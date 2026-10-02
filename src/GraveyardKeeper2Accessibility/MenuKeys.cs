@@ -91,6 +91,14 @@ internal static class MenuKeys
             return;
         }
 
+        // The hotbar slot window: arrows pick a slot, Enter or 1-4 pins. And 1-4 on an item in the
+        // inventory pins it straight to that slot - see HotBarReader.
+        if (HotBarReader.TryKeys(enter) || ItemMenuReader.TryKeys())
+        {
+            _heldKey = KeyCode.None;
+            return;
+        }
+
         // Arrowing between the answers is handled there too, and for the same reason: the box
         // raises no focus events, so the mod tracks which answer the player is on itself.
         if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.RightArrow))

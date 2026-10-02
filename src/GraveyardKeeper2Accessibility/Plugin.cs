@@ -54,6 +54,8 @@ public class Plugin : BaseUnityPlugin
         SurveyResultReader.Init();
         FolioReader.Init();
         VendorReader.Init();
+        HotBarReader.Init();
+        ItemMenuReader.Init(Config);
 
         _repeatKey = ModKeys.Bind(Config,
             "Keys", "RepeatFocus", new KeyboardShortcut(KeyCode.F8),
@@ -154,6 +156,15 @@ public class Plugin : BaseUnityPlugin
                 new Harmony(PluginInfo.Guid + ".vendor").PatchAll(typeof(VendorReader));
                 Log.LogInfo("Patched the trading window.");
             }
+            if (HotBarReader.Ready)
+            {
+                new Harmony(PluginInfo.Guid + ".hotbar").PatchAll(typeof(HotBarReader));
+                Log.LogInfo("Patched the hotbar slot window.");
+            }
+            new Harmony(PluginInfo.Guid + ".itemmenu").PatchAll(typeof(ItemMenuReader));
+            Log.LogInfo("Patched destroying items from the item menu.");
+            new Harmony(PluginInfo.Guid + ".planting").PatchAll(typeof(PlantingReader));
+            Log.LogInfo("Patched planting with a seed in hand.");
         }
         catch (Exception ex)
         {

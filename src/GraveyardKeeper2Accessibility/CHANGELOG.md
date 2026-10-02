@@ -51,6 +51,8 @@ are built in but not yet tested — see *Known limitations* in the README.
   across bridges and through doors. It stops at the spot where E actually picks the thing you walked
   to, and tells you if something else is in front of you instead. It will not start while a story
   scene is moving you.
+- **Rooms the game gives no walking map, such as the guard barracks,** work too: the mod maps the
+  room's floor itself when you walk in, so the object list, routes and auto-walk work inside.
 - **Ctrl+F5 takes your controls back** if a scene ever leaves you stuck.
 - **What you walk up to is named**, with what E and F do there, and why an action is not available.
 
@@ -58,6 +60,14 @@ are built in but not yet tested — see *Known limitations* in the README.
 
 - **H** energy, insanity and buffs, **K** money, **L** tech points and town happiness, **Z** day and
   time, **G** the zone you are in and its rating, **Y** the hotbar, **O** full item details.
+- **Putting items on the hotbar:** in the inventory, press **1 to 4** on an item to put it on that
+  hotbar slot. The game's own slot window is read too: arrows choose a slot, Enter puts it there.
+  Pinned items say which slot they are on.
+- **The item menu** (use, put on the hotbar, destroy) opens with **Shift+F10** or the Applications
+  key on an inventory item, without using the item. Destroying an item says what was destroyed.
+- **Planting with a seed in hand speaks:** "Pflanzen" on a seed (or its hotbar key) says what you are
+  holding; E on each empty bed then plants it without the bed window and says how many are left, or
+  why the bed refuses.
 - **Gains and losses** of energy, money, tech points and happiness are said once per action.
 - **Pickups, a full bag, equipping and unequipping** are announced. Items say their quality as
   bronze, silver or gold.

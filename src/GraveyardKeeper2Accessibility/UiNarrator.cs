@@ -319,7 +319,8 @@ internal static class UiNarrator
         TreesReader.SpeaksForItself(window) || ItemCountReader.SpeaksForItself(window) ||
         QuestPageReader.SpeaksForItself(window) || VendorReader.SpeaksForItself(window) ||
         BindingsReader.SpeaksForItself(window) || SurveyResultReader.SpeaksForItself(window) ||
-        MilitaryReader.SpeaksForItself(window);
+        MilitaryReader.SpeaksForItself(window) || HotBarReader.SpeaksForItself(window) ||
+        ItemMenuReader.SpeaksForItself(window);
 
     private static string WindowName(LazyWidgetBase window)
     {
@@ -350,7 +351,7 @@ internal static class UiNarrator
             // the generic item-cell reading would call empty - see CraftReader.
             var ordered = DescribeSwitch(item) ?? DialogueReader.DescribeWidget(item) ?? CraftReader.DescribeWidget(item) ?? StationsReader.DescribeWidget(item) ??
                           TreesReader.DescribeWidget(item) ?? QuestPageReader.DescribeWidget(item) ?? FolioReader.DescribeWidget(item) ?? DescribeItemCell(item) ??
-                          BuildingReader.DescribeWidget(item) ?? MilitaryReader.DescribeWidget(item);
+                          BuildingReader.DescribeWidget(item) ?? MilitaryReader.DescribeWidget(item) ?? ItemMenuReader.DescribeWidget(item);
             if (ordered != null) return VendorReader.WithPrice(item, ordered);
 
             foreach (var tmp in item.GetComponentsInChildren<TMP_Text>(includeInactive: false))
@@ -430,6 +431,9 @@ internal static class UiNarrator
         var tool = ToolSlotReader.DescribeCell(cell);
         if (tool != null) return tool;
 
+        // The hotbar slot window is read and driven by HotBarReader.
+        if (HotBarReader.SilencesCell(cell)) return "";
+
         var displaying = cell.DisplayingItem;
 
         // An empty slot has to say so. Silence here reads as a broken mod, and "nothing" is a
@@ -444,7 +448,11 @@ internal static class UiNarrator
         var need = CraftReader.NeedText(cell, name);
         if (need != null) return need;
 
-        return displaying.Count > 1 ? Loc.Fmt("inventory.item_many", name, displaying.Count) : name;
+        var text = displaying.Count > 1 ? Loc.Fmt("inventory.item_many", name, displaying.Count) : name;
+
+        // "Schnellleiste 2" on an inventory item that is pinned - see HotBarReader.
+        var pinned = cell.GetComponentInParent<CharMainPageWidget>() == null ? null : HotBarReader.PinnedNote(displaying.id);
+        return pinned == null ? text : $"{text}, {pinned}";
     }
 
     private static void AddPart(List<string> parts, string raw)

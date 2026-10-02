@@ -156,6 +156,8 @@ So there are two sets of keys that both work, and neither disturbs the other:
 | **Enter** | Activate the focused control — added by the mod. |
 | **F6** | In a chest, shop or conveyor chest: jump between your bag, the chest and the conveyor slots. The side is also named whenever you arrow into it. |
 | **Space** | On an item in a chest, shop or your bag: move it to the other side (out of the chest into your bag, or back) — added by the mod. The game only offers this on a controller or the right mouse button. |
+| **1 – 4** | On an item in your inventory (character page): put it on that hotbar slot — added by the mod. You hear "… on hotbar slot 2", and what it replaced. Items that cannot be used from the hotbar say so. Inventory items already on the hotbar say "hotbar 2". |
+| **Shift+F10** or the **Applications key** | On an item in your inventory: open its menu — use, plant or equip, put on the hotbar, destroy — without using the item. Arrows and Enter choose; greyed-out entries say "unavailable". Destroying removes the whole stack at once, with no question asked, and says what was destroyed. — added by the mod |
 | **Escape** | Go back / close the window — the game's own. |
 | **Mouse** | Still works exactly as before. |
 
@@ -165,6 +167,10 @@ arrow into it; **F6** jumps to the next one. Every item says its price. **Space*
 item into the deal (or takes it back out), and after each change you hear what the deal comes to
 ("You get 3 bronze" / "You pay …") or why it cannot go through. **F** accepts the deal, **F8**
 says the whole deal again, **Escape** empties the deal, or closes the window when it is empty.
+
+**Hotbar slot window** ("put on the hotbar" in an item's menu, Shift+F10): says the item and what the
+four slots hold. Arrows choose a slot, **Enter** or **1 – 4** puts the item there, **Escape** leaves
+the hotbar unchanged.
 
 **How many? window** (moving, selling or buying part of a stack): says the item, the amount and the
 most you can take — and the price at a vendor. Left / Right arrow (or A / D) change the amount, Up
@@ -223,6 +229,13 @@ flask, the runes they add up to, what they make, and how many flasks you have.
 Space and F6 only do this while a station is open; elsewhere they keep their usual jobs. If the
 game turns out to have its own keyboard key for one of these actions, the mod leaves that key to the
 game and the station tells you which key it is.
+
+**Planting many beds with a seed in hand** (the game's own quick way): choose **Pflanzen** on a seed
+in the item menu (Shift+F10), or put the seeds on the hotbar and press their number outside the
+inventory. You hear "… in der Hand, noch 12". Now **E** on each empty bed plants it straight away —
+no bed window, no choosing the seed again — and says "… gepflanzt, noch 11", or why not (wrong bed,
+no gardening mastery yet, a worker is assigned). The seed stays in hand until it runs out or **F**,
+Escape or Tab puts it away.
 
 ## Other stations
 
