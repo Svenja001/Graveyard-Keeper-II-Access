@@ -2,8 +2,8 @@
 
 The unmodified BepInEx 5 release, vendored here so the mod can ship a **one-extract install**:
 a blind player should not have to assemble a loader and a mod from two downloads, each with its
-own way of failing silently. See `src/GraveyardKeeperAccessibility.csproj`, which folds this
-folder into `..._WithBepInEx.zip`.
+own way of failing silently. See `src/GraveyardKeeper2Accessibility/GraveyardKeeper2Accessibility.csproj`,
+which folds this folder into `..._WithBepInEx.zip`.
 
 | | |
 |---|---|

@@ -13,7 +13,7 @@ Version 0.1.0. This file ships beside the mod so the keys can be found without a
 | **End** | **Jumps straight to "next story steps"** — what the story is waiting for you to use — and says the nearest. If nothing is waiting, says your current task. |
 | **Home** | Says the selected object again — its state, distance and direction — then how long the way there really is and which areas it passes through. |
 | **Ctrl+Home** | **Walks you to the selected object.** Press again to stop. |
-| **J** | Reads the quests you currently have, and for each one in progress what the game is actually waiting for: "Jetzt: geh zu …", "benutze …", "zerstöre …" — plus anything still missing first, such as armour not equipped. |
+| **J** | Reads the quests you currently have, and for each one in progress what the game is actually waiting for: "Now: go to …", "use …", "destroy …" — plus anything still missing first, such as armour not equipped. |
 | **F4** | Fight status: whether a fight is running, your health, the health of what you are defending, and how many enemies are near with the closest one's direction. In a squad fight also: how many enemies are left in total, whether the base is safe or under attack, which lines are breached, how many of each squad are still alive, and which flag you are carrying. During a fight, your health and the defended object's health are also announced at 75, 50 and 25 percent. |
 | **Shift+F4** | Fight readiness, anywhere: your total defence power, the barricades and towers at the base, the mercenaries, and each zombie squad with how many zombies it has and how many are ready to fight. Also what the last fight you looked at asked for. |
 | **Ctrl+Enter** | In the pre-fight window (after choosing a fight at Herbert), and in the fight builder's window on the battlefield: **starts the fight.** The game only offers this on a controller. |
@@ -32,7 +32,7 @@ and you lose only if they take your base. What you do is prepare, and move flags
   filled and how strong they are. Carry a zombie there and press E on a squad to put it in. A
   zombie only fights, and only adds strength, when it holds a **pike or bow and wears armour**.
   The mercenaries are one more squad, paid for once.
-- **Defence power** (the "Kaserne" in quest texts) is the strength of your barricades and towers
+- **Defence power** (the "Barracks" in quest texts) is the strength of your barricades and towers
   plus the squads you choose for a fight. Shift+F4 adds it up.
 - **The pre-fight window** opens when you pick a fight. It says the fight, how many squads you may
   take, and your defence against what the fight needs. Arrow through the squads; Enter chooses or
@@ -74,11 +74,11 @@ mod gives is where the wheel is, read as a 24-hour clock: midnight at the bottom
   "Lost 3 energy", "Spent 5 silver". Changes from one action are added up and said once.
 - **"Not enough energy"** when a tool swing or a craft fails because you are out of it.
 - **Star quality** on items, wherever an item is named — picked up, in your inventory, on the
-  ground. "Carrot, 2 stars".
+  ground, as bronze, silver or gold: "Carrot, silver quality".
 
 The gains and losses can be switched off with `ResourceChanges` in the config file.
 
-**Directions are given as compass directions**: "Grabstein, 12 Meter: 9 Norden, 8 Westen" means
+**Directions are given as compass directions**: "Gravestone I, 12 metres: 9 north, 8 west" means
 about nine metres north and eight west. North is W, south is S, west is A, east is D. Movement in GK2
 is fixed to the screen — W always goes north, whatever way your character faces — so these
 directions stay true while you walk. Press Home again as you go to hear what is left. The bigger
@@ -90,16 +90,16 @@ building you are not in), are left out, so categories with nothing usable disapp
 steps are the exception: they are always listed, reachable or not.
 
 **The list also says what state a thing is in.** A furnace or workbench says what it is making and
-how far along it is ("Ofen, stellt Bronzebarren her, 40 Prozent, danach noch 15"), or that its output
+how far along it is ("Furnace I, making Bronze Ingot, 40 percent, 15 more after that"), or that its output
 is ready to collect; a garden bed says how far its crop has grown. Stones, trees and ore you cannot
-work yet say why: "braucht Spitzhacke" when the tool is not on your belt, "braucht Meisterschaft 4 in
-Schmieden, du hast 2" when your skill is too low. Nothing is added when you can simply work it.
+work yet say why: "needs pickaxe" when the tool is not on your belt, "needs Smithing mastery 4, you
+have 2" when your skill is too low. Nothing is added when you can simply work it.
 
 **The metres in the list are a straight line; the way may be much longer.** When it is — say a
 cliff lies between you and the target and the only way down is through the village — the list adds
-"Weg 140 Meter, großer Umweg". Home always says the length of the way and the areas it passes
+"Way 140 metres, a long detour". Home always says the length of the way and the areas it passes
 through. If the way crosses a spot where the story may take over (the forest guards, say), you hear
-"Achtung, Story-Bereich auf dem Weg" before you set off, and again when walking starts.
+"Careful, story zone on the way" before you set off, and again when walking starts.
 
 These are the same finding-and-reaching keys as the Graveyard Keeper mod, so they should already
 be familiar. Objects are grouped by what they are: people, doors and passages, plants, berries and
@@ -163,7 +163,7 @@ So there are two sets of keys that both work, and neither disturbs the other:
 four lists — your bag, what you sell, the trader's goods, what you buy — and each is named when you
 arrow into it; **F6** jumps to the next one. Every item says its price. **Space** puts the focused
 item into the deal (or takes it back out), and after each change you hear what the deal comes to
-("Du bekommst 3 Bronze" / "Du zahlst …") or why it cannot go through. **F** accepts the deal, **F8**
+("You get 3 bronze" / "You pay …") or why it cannot go through. **F** accepts the deal, **F8**
 says the whole deal again, **Escape** empties the deal, or closes the window when it is empty.
 
 **How many? window** (moving, selling or buying part of a stack): says the item, the amount and the
@@ -188,7 +188,7 @@ red skulls, each organ slot (heart, brain, … — "unknown" for organs you have
 as the game shows a question mark), what is in the pockets; at a grave, its quality, tombstone and
 fence. F8 reads it again. Arrowing onto an organ slot names the slot as well as the organ.
 To take the body off the table (or exhume it at a grave), press **Up arrow** until you are past the
-top row: you land on "Leiche nehmen" (or the reason it cannot be taken right now). **Enter** there
+top row: you land on "Take body" (or the reason it cannot be taken right now). **Enter** there
 takes the body, Down arrow goes back to where you were. **B** does the same from anywhere in the
 window. The game itself offers this button only to the mouse or a controller.
 
@@ -214,7 +214,7 @@ and **F8** reads it again at any time.
 
 **What you hear.** At a workbench: its name, how many recipes (and how many not learned yet), and
 the queue. Each recipe says what it makes, and "cannot be made right now" or the mastery it needs;
-its tooltip then lists the ingredients as "3 of 5 planks". A recipe's setup window says the amount,
+its tooltip then lists the ingredients as "5 Wooden Plank, you have 3". A recipe's setup window says the amount,
 every ingredient with how many you have, energy and insanity cost, how long it takes, your mastery
 against what it needs, and either the keys to make it or the reason it cannot be made — "not enough
 ingredients", "the right tool is not equipped", and so on. The alchemy table says what is in the
@@ -228,7 +228,7 @@ game and the station tells you which key it is.
 
 Each is read out when it opens; **F8** reads it again.
 
-- **Resurrection table:** the zombie's name, skulls, organs, the liquids it needs ("1 of 2 …"),
+- **Resurrection table:** the zombie's name, skulls, organs, the liquids it needs ("2 …, you have 1"),
   the collar, and whether it can be raised — or why not. **Enter** on the collar slot picks a
   collar, **N** rolls a new name, **F** raises it, **B** takes the body.
 - **Prayer stand:** church quality, happiness, how many parishioners will come, the sermon and its
@@ -243,7 +243,7 @@ Each is read out when it opens; **F8** reads it again.
   the ingredients that give red, green and blue runes. Each recipe says the runes it needs
   ("needs 1 red, 1 green") and what the potion does; each ingredient says the runes it gives.
 - **Town building desk:** how many buildings; each says its name, description, and every material
-  as "3 of 5". **Enter** builds.
+  as "5 Wooden Plank, you have 3". **Enter** builds.
 - **Fishing:** the bait window says the bait, how many you have, and which fish can bite on it
   ("an unknown fish" until you have caught one). **Left / Right** change the bait, **F** casts.
   Then, while reeling, the mod speaks the parts the game only shows:
@@ -274,8 +274,8 @@ map. The page is named when it comes up; **F8** says the page summary again.
 
 **Tech tree.** Each branch starts with how many technologies it has, how many you have learned, how
 many you could learn right now, and your red, green and blue points. Each technology says whether
-it is learned, can be learned, or what it needs first; its cost as "10 of 25 red points" (what you
-have of what it costs); and what it unlocks. Some nodes are reputation gates ("reputation with the
+it is learned, can be learned, or what it needs first; its cost as "25 red points, you have 10"
+(what it costs, then what you have); and what it unlocks. Some nodes are reputation gates ("reputation with the
 foreman: 3 of 10"): they open by themselves when that reputation is reached. Opening a technology
 reads it in full and says whether Enter will unlock it — or why not. Escape closes it.
 
@@ -290,7 +290,7 @@ against the points you have, what it needs first, and what it does.
 **Craft confirmations** (extracting an organ, any craft): **F** starts it — the game's own key.
 
 **Building (for example the graveyard builder, to lay out a grave):** each entry in the list says
-its cost against what you carry ("2 of 5 planks") and whether it can be built. Ctrl+Left / Ctrl+Right
+its cost against what you carry ("5 Wooden Plank, you have 2") and whether it can be built. Ctrl+Left / Ctrl+Right
 switch tabs. After choosing an entry you place it:
 
 | Key | While placing |
@@ -298,15 +298,15 @@ switch tabs. After choosing an entry you place it:
 | **Arrow keys** | Move one square north, south, west or east, then say whether it is free and where it is from you. |
 | **Space** or **End** | Jump to the nearest free spot; press again for the next one. Buildings that need a marked plot (a grave on a grave plot) are tried on every such plot. |
 | **Home** | Say again whether the spot is free, and where it is. |
-
-**Remove mode ("Entfernen" in the building menu):** Space, End or Page down goes to the next building
-that can be removed here, nearest first (Shift+Space or Page up goes back); Home says the selected
-one; Enter removes it. Most buildings are not removed at once but *marked for demolition*: leave
-remove mode, walk to it (the object list says "zum Abriss markiert") and knock it down with F. Enter
-on a marked building takes the mark back off.
 | **Enter** | Build here. |
 | **R** | Rotate — the game's own key; the mod says "rotated". |
 | **Escape** | Stop placing — the game's own key. |
+
+**Remove mode ("Remove" in the building menu):** Space, End or Page down goes to the next building
+that can be removed here, nearest first (Shift+Space or Page up goes back); Home says the selected
+one; Enter removes it. Most buildings are not removed at once but *marked for demolition*: leave
+remove mode, walk to it (the object list says "marked for demolition") and knock it down with F. Enter
+on a marked building takes the mark back off.
 
 **Cutscenes and dialogue move on with E** — the game's own key, the same one you use to interact.
 The mod adds nothing here.

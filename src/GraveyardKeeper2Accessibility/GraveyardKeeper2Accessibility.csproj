@@ -27,7 +27,30 @@
         <NoWarn>CS0436;CS1591</NoWarn>
         <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper 2</GameDir>
         <OutputPath>$(GameDir)\BepInEx\plugins\GraveyardKeeper2Accessibility</OutputPath>
+        <ReleasesDir>$(MSBuildProjectDirectory)\..\AAA_Releases</ReleasesDir>
     </PropertyGroup>
+
+    <!-- CHANGELOG.md is the source of truth for the version, as in the GK1 repo: the first
+         "## X.Y.Z" header wins over the <Version> above, which is only the fallback. -->
+    <PropertyGroup Condition="Exists('CHANGELOG.md')">
+        <_ChangelogText>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\CHANGELOG.md'))</_ChangelogText>
+        <_ChangelogVersion>$([System.Text.RegularExpressions.Regex]::Match($(_ChangelogText), '##\s+(\d+\.\d+\.\d+)').Groups[1].Value)</_ChangelogVersion>
+        <Version Condition="'$(_ChangelogVersion)' != ''">$(_ChangelogVersion)</Version>
+    </PropertyGroup>
+
+    <!-- [BepInPlugin] needs the version as a compile-time constant, so write it into the other
+         half of the partial PluginInfo class rather than reading the assembly attribute at runtime. -->
+    <Target Name="WritePluginVersion" BeforeTargets="CoreCompile">
+        <PropertyGroup>
+            <_PluginVersionFile>$(IntermediateOutputPath)PluginVersion.g.cs</_PluginVersionFile>
+        </PropertyGroup>
+        <WriteLinesToFile File="$(_PluginVersionFile)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                          Lines="namespace GraveyardKeeper2Accessibility%3B;internal static partial class PluginInfo { internal const string Version = &quot;$(Version)&quot;%3B }" />
+        <ItemGroup>
+            <Compile Include="$(_PluginVersionFile)" />
+            <FileWrites Include="$(_PluginVersionFile)" />
+        </ItemGroup>
+    </Target>
 
     <!-- Nothing referenced here may be copied next to the plugin: BepInEx scans plugins\ and a
          shipped copy of Assembly-CSharp.dll would shadow the real game assembly. -->
@@ -77,6 +100,82 @@
         <None Include="..\..\libs\native\prism\prism.dll" Link="prism.dll" CopyToOutputDirectory="PreserveNewest" />
         <None Include="..\..\libs\native\prism\LICENSE" Link="prism-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
         <None Include="..\..\libs\native\prism\NOTICE" Link="prism-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
+        <!-- Install instructions and the GPL-3.0 text, which has to accompany the distribution. -->
+        <None Include="..\..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="CHANGELOG.md" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
+
+    <!--
+        Release ZIPs, built by "dotnet build -c Release" (release.ps1 does that for you). Two of
+        them, as in the GK1 repo:
+          - _ModOnly:     rooted at the game's BepInEx\ folder, for players who already have
+                          BepInEx 5 installed.
+          - _WithBepInEx: rooted at the GAME folder, carrying the unmodified loader from
+                          libs\bepinex-dist, so the whole install is one extract. Doorstop's
+                          winhttp.dll has to sit beside the .exe, which is why the root differs.
+        No GOG 32-bit variant: GK2 is x64 only.
+
+        Staged from an explicit list of what the build produces, not by globbing OutputPath.
+        OutputPath is the live plugin folder in the game, so a glob would also pick up anything
+        left over in it from older builds.
+
+        The documents are repeated at the ZIP root with a prefix: that root is where a blind
+        player lands after extracting, and in the game folder a bare CHANGELOG.md or LICENSE.txt
+        would sit next to BepInEx's own changelog.txt and BepInEx-LICENSE.txt.
+    -->
+    <ItemGroup>
+        <RootDoc Include="..\..\README.md" Link="Accessibility-Mod-README.md" />
+        <RootDoc Include="KEYBINDINGS.md" Link="Accessibility-Mod-KEYBINDINGS.md" />
+        <RootDoc Include="CHANGELOG.md" Link="Accessibility-Mod-CHANGELOG.md" />
+        <RootDoc Include="..\..\LICENSE" Link="Accessibility-Mod-LICENSE.txt" />
+    </ItemGroup>
+
+    <Target Name="ReleaseZips" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+        <PropertyGroup>
+            <_Staging>$(TEMP)\GK2_staging\$(MSBuildProjectName)</_Staging>
+            <_ModOnlyRoot>$(_Staging)\modonly</_ModOnlyRoot>
+            <_FullRoot>$(_Staging)\full</_FullRoot>
+            <_BepInExDist>$(MSBuildProjectDirectory)\..\..\libs\bepinex-dist</_BepInExDist>
+            <_ZipBase>$(ReleasesDir)\$(MSBuildProjectName)_v$(Version)</_ZipBase>
+        </PropertyGroup>
+
+        <!-- Every file the build copies next to the DLL (lang\, prism, docs), each with the path
+             it has inside the plugin folder. -->
+        <CallTarget Targets="GetCopyToOutputDirectoryItems">
+            <Output TaskParameter="TargetOutputs" ItemName="_ShipExtra" />
+        </CallTarget>
+        <ItemGroup>
+            <_ShipFile Include="$(TargetPath)" TargetPath="$(TargetFileName)" />
+            <_ShipFile Include="@(_ShipExtra)" />
+            <_BepInExFiles Include="$(_BepInExDist)\**\*.*" Exclude="$(_BepInExDist)\README.md" />
+        </ItemGroup>
+
+        <RemoveDir Directories="$(_Staging)" />
+        <MakeDir Directories="$(ReleasesDir)" />
+
+        <!-- Mod only: <zip>\plugins\GraveyardKeeper2Accessibility\... -->
+        <Copy SourceFiles="@(_ShipFile)" DestinationFiles="@(_ShipFile->'$(_ModOnlyRoot)\plugins\$(MSBuildProjectName)\%(TargetPath)')" />
+        <Copy SourceFiles="@(RootDoc)" DestinationFiles="@(RootDoc->'$(_ModOnlyRoot)\%(Link)')" />
+
+        <!-- With BepInEx: <zip>\winhttp.dll, <zip>\BepInEx\core\..., <zip>\BepInEx\plugins\... -->
+        <Copy SourceFiles="@(_BepInExFiles)" DestinationFiles="@(_BepInExFiles->'$(_FullRoot)\%(RecursiveDir)%(Filename)%(Extension)')" />
+        <Copy SourceFiles="@(_ShipFile)" DestinationFiles="@(_ShipFile->'$(_FullRoot)\BepInEx\plugins\$(MSBuildProjectName)\%(TargetPath)')" />
+        <Copy SourceFiles="@(RootDoc)" DestinationFiles="@(RootDoc->'$(_FullRoot)\%(Link)')" />
+
+        <!-- Fail loudly rather than shipping a ZIP that quietly cannot load or speak. -->
+        <Error Condition="!Exists('$(_ModOnlyRoot)\plugins\$(MSBuildProjectName)\$(TargetFileName)')" Text="Mod-only ZIP is missing the mod DLL." />
+        <Error Condition="!Exists('$(_ModOnlyRoot)\plugins\$(MSBuildProjectName)\prism.dll')" Text="Mod-only ZIP is missing prism.dll - is libs\native\prism populated?" />
+        <Error Condition="!Exists('$(_ModOnlyRoot)\plugins\$(MSBuildProjectName)\lang\$(MSBuildProjectName).en.json')" Text="Mod-only ZIP is missing the English strings." />
+        <Error Condition="!Exists('$(_FullRoot)\winhttp.dll')" Text="BepInEx bundle is missing winhttp.dll - is libs\bepinex-dist populated? See its README." />
+        <Error Condition="!Exists('$(_FullRoot)\BepInEx\core\BepInEx.Preloader.dll')" Text="BepInEx bundle is missing BepInEx\core." />
+
+        <ZipDirectory Overwrite="true" SourceDirectory="$(_ModOnlyRoot)" DestinationFile="$(_ZipBase)_ModOnly.zip" />
+        <ZipDirectory Overwrite="true" SourceDirectory="$(_FullRoot)" DestinationFile="$(_ZipBase)_WithBepInEx.zip" />
+        <RemoveDir Directories="$(_Staging)" />
+
+        <Message Importance="high" Text="Release: $(MSBuildProjectName)_v$(Version)_ModOnly.zip" />
+        <Message Importance="high" Text="Release: $(MSBuildProjectName)_v$(Version)_WithBepInEx.zip" />
+    </Target>
 
 </Project>
