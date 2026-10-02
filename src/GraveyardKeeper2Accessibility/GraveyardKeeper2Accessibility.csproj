@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Graveyard Keeper II is Unity 6000.3.9f1 on Mono, x64 only. That fixes three things this
+        file would otherwise have to decide:
+          - netstandard2.1, not GK1's net481. Unity 6 Mono ships netstandard.dll and
+            System.Memory.dll in Managed\, and BepInEx 5 loads a netstandard2.1 plugin fine.
+          - one output, not three. There is no 32-bit build, so no Tolk and no GOG variant
+            (the GK1 repo needed both).
+          - references come straight out of the game's Managed\ folder, copied into libs\game\
+            at setup time. There is no GameLibs NuGet package for GK2.
+    -->
+    <PropertyGroup>
+        <TargetFramework>netstandard2.1</TargetFramework>
+        <LangVersion>preview</LangVersion>
+        <AssemblyName>GraveyardKeeper2Accessibility</AssemblyName>
+        <RootNamespace>GraveyardKeeper2Accessibility</RootNamespace>
+        <Version>0.1.0</Version>
+        <Authors>svenja001</Authors>
+        <Nullable>disable</Nullable>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+        <DebugType>portable</DebugType>
+        <Deterministic>true</Deterministic>
+        <!-- CS0436: our GameKey/etc. never collide, but the game assemblies do define types that
+             also exist in netstandard's facade set; silence the type-forwarding noise. -->
+        <NoWarn>CS0436;CS1591</NoWarn>
+        <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper 2</GameDir>
+        <OutputPath>$(GameDir)\BepInEx\plugins\GraveyardKeeper2Accessibility</OutputPath>
+    </PropertyGroup>
+
+    <!-- Nothing referenced here may be copied next to the plugin: BepInEx scans plugins\ and a
+         shipped copy of Assembly-CSharp.dll would shadow the real game assembly. -->
+    <ItemDefinitionGroup>
+        <Reference>
+            <Private>False</Private>
+        </Reference>
+    </ItemDefinitionGroup>
+
+    <ItemGroup>
+        <Reference Include="BepInEx"><HintPath>..\..\libs\bepinex\BepInEx.dll</HintPath></Reference>
+        <Reference Include="0Harmony"><HintPath>..\..\libs\bepinex\0Harmony.dll</HintPath></Reference>
+        <Reference Include="BepInEx.Harmony"><HintPath>..\..\libs\bepinex\BepInEx.Harmony.dll</HintPath></Reference>
+        <Reference Include="MonoMod.Utils"><HintPath>..\..\libs\bepinex\MonoMod.Utils.dll</HintPath></Reference>
+    </ItemGroup>
+
+    <!-- Every DLL that was copied out of the game's Managed\ folder. Globbed rather than listed:
+         the set that matters grows with each phase of the plan, and an unused reference is a far
+         cheaper mistake than a missing one.
+
+         The path goes straight into Include, which ResolveAssemblyReference accepts as a direct
+         file reference. A HintPath would need the assembly's simple name in Include, and getting
+         that from a glob means an item transform - at which point each Reference has lost the
+         metadata that said where it came from. -->
+    <ItemGroup>
+        <Reference Include="..\..\libs\game\*.dll">
+            <Private>False</Private>
+        </Reference>
+    </ItemGroup>
+
+    <!-- Spoken strings, one file per language, loaded at runtime by Loc. -->
+    <ItemGroup>
+        <Content Include="lang\*.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- The key list travels with the mod. There is no in-game settings screen for it, so this
+         file is the only place a player can find out what the mod's keys are - and a blind player
+         who has just extracted the download has this folder open in front of them. -->
+    <ItemGroup>
+        <None Include="KEYBINDINGS.md" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- Prism speaks through NVDA/JAWS and drives a braille display; without it the mod falls
+         back to the Windows SAPI voice. x64 only, which is all GK2 has. MPL-2.0 requires the
+         licence text to travel with the binary. -->
+    <ItemGroup>
+        <None Include="..\..\libs\native\prism\prism.dll" Link="prism.dll" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\libs\native\prism\LICENSE" Link="prism-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\libs\native\prism\NOTICE" Link="prism-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+</Project>
