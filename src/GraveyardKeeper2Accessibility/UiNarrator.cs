@@ -320,7 +320,7 @@ internal static class UiNarrator
         QuestPageReader.SpeaksForItself(window) || VendorReader.SpeaksForItself(window) ||
         BindingsReader.SpeaksForItself(window) || SurveyResultReader.SpeaksForItself(window) ||
         MilitaryReader.SpeaksForItself(window) || HotBarReader.SpeaksForItself(window) ||
-        ItemMenuReader.SpeaksForItself(window);
+        ItemMenuReader.SpeaksForItself(window) || TravelMapReader.SpeaksForItself(window);
 
     private static string WindowName(LazyWidgetBase window)
     {
@@ -349,7 +349,7 @@ internal static class UiNarrator
         {
             // Station cells first: recipe and queue cells are item cells drawn without an item, which
             // the generic item-cell reading would call empty - see CraftReader.
-            var ordered = DescribeSwitch(item) ?? DialogueReader.DescribeWidget(item) ?? CraftReader.DescribeWidget(item) ?? StationsReader.DescribeWidget(item) ??
+            var ordered = DescribeSwitch(item) ?? DialogueReader.DescribeWidget(item) ?? OrdersReader.DescribeWidget(item) ?? CraftReader.DescribeWidget(item) ?? StationsReader.DescribeWidget(item) ??
                           TreesReader.DescribeWidget(item) ?? QuestPageReader.DescribeWidget(item) ?? FolioReader.DescribeWidget(item) ?? DescribeItemCell(item) ??
                           BuildingReader.DescribeWidget(item) ?? MilitaryReader.DescribeWidget(item) ?? ItemMenuReader.DescribeWidget(item);
             if (ordered != null) return VendorReader.WithPrice(item, ordered);

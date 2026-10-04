@@ -71,6 +71,13 @@ internal static class MenuKeys
 
         var enter = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
 
+        // The travel map has no navigation items either: the mod keeps the list of destinations.
+        if (TravelMapReader.TryKeys(enter))
+        {
+            _heldKey = KeyCode.None;
+            return;
+        }
+
         // Confirmation boxes come first, and are the reason Enter is handled before anything else
         // is resolved. They register no navigation items, so there is no controller to find, and
         // their confirm button listens for GameKey.Select - which has no keyboard binding at all.

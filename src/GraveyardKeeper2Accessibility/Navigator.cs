@@ -52,6 +52,22 @@ internal static class Navigator
         "wgo.Work", "ladders", "enemies", "zones",
     };
 
+    /// <summary>
+    /// The only lists offered while a fight is prepared or fought, in this order. Reported after
+    /// two lost fights (2026-10-03): the player paged through trees, wells and the toilet looking
+    /// for the fight, while the enemies and their own squad were in no list at all. The base comes
+    /// first because holding it is how a fight is won.
+    /// </summary>
+    private static readonly string[] FightPriority =
+    {
+        "fight_points", "enemies", "allies", "wgo.FlagStand", "wgo.Flag", "wgo.Barricade", "wgo.FightBuilder", "story",
+    };
+
+    /// <summary>True while a fight is being prepared or fought: the lists shrink to <see cref="FightPriority"/>.</summary>
+    private static bool InFight => FightAnnouncer.State != FightState.Disabled;
+
+    private static bool _fightMode;
+
     /// <summary>Everything currently spawned. Maintained by events, never scanned.</summary>
     private static readonly HashSet<Wgo> Spawned = new();
 
@@ -345,11 +361,16 @@ internal static class Navigator
         Reachability.Refresh(NavRange);
         _hiddenCount = 0;
 
+        var fight = InFight;
+
         foreach (var wgo in Spawned)
         {
             // Unity objects compare equal to null once destroyed even while still in the set - a
             // destroy event can be missed when a whole scene chunk unloads at once.
             if (wgo == null) continue;
+
+            // Enemies are listed by AddFightUnits, with their health, not by their id.
+            if (fight && FightAnnouncer.IsLiveEnemy(wgo)) continue;
 
             var data = wgo.Data;
             if (data == null || data.Definition == null) continue;
@@ -382,6 +403,47 @@ internal static class Navigator
         AddStoryZones(from);
         AddCapturePoints(from);
         AddFarStorySteps();
+
+        if (fight)
+        {
+            AddFightUnits(from);
+            AllTargets.RemoveAll(t => Array.IndexOf(FightPriority, t.CategoryKey) < 0);
+        }
+    }
+
+    /// <summary>
+    /// Every living enemy, nearest first once sorted, with its health; and our squads, one entry
+    /// each, where their living members stand.
+    /// </summary>
+    private static void AddFightUnits(Vector3 from)
+    {
+        try
+        {
+            if (FightAnnouncer.State == FightState.ActiveFight)
+            {
+                foreach (var wgo in Spawned)
+                {
+                    if (!FightAnnouncer.IsLiveEnemy(wgo)) continue;
+                    var data = wgo.Data;
+                    if (Flat(data.Position - from).magnitude > NavRange) continue;
+
+                    var hp = data.HpComponent;
+                    var label = ItemText.Name(data.id);
+                    if (hp != null && hp.MaxHpValue > 0 && hp.Hp < hp.MaxHpValue)
+                        label = Loc.Fmt("fight.enemy_hp", label, Mathf.RoundToInt(100f * hp.Hp / hp.MaxHpValue));
+                    var where = MilitaryReader.PointAt(data.Position);
+                    if (where != null) label = Loc.Fmt("fight.squad_at", label, where);
+                    AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, "enemies", label));
+                }
+            }
+
+            foreach (var (label, position) in FightAnnouncer.Squads())
+                AllTargets.Add(new NavTarget("squad", position, null, "allies", label));
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Nav] Could not read the fighters: {ex.Message}");
+        }
     }
 
     /// <summary>How many objects the last rebuild left out as unusable or out of reach, for the log.</summary>
@@ -545,11 +607,21 @@ internal static class Navigator
     /// </summary>
     private static void AddFarStorySteps()
     {
-        foreach (var data in FarStorySteps())
+        foreach (var data in FarStorySteps().Concat(CarriedCrateDestinations()))
         {
             var target = new NavTarget(data.id, data.Position, data.WorldId, "story", data: data);
             if (!AllTargets.Any(t => t.CategoryKey == "story" && t.SameAs(target))) AllTargets.Add(target);
         }
+    }
+
+    /// <summary>
+    /// The warehouse pallets that take the supply crate on the player's head. Nothing in the world
+    /// marks where a crate goes, and the pallet is the next step for as long as it is carried.
+    /// </summary>
+    private static IEnumerable<WgoData> CarriedCrateDestinations()
+    {
+        var scenes = MainGame.WorldData?.LoadedScenes;
+        return CarryAnnouncer.DeliveryTargets().Where(d => scenes == null || scenes.Contains(d.WorldId));
     }
 
     private static IEnumerable<WgoData> FarStorySteps()
@@ -588,6 +660,8 @@ internal static class Navigator
     /// The capture points of the fight being prepared or fought: where squads hold a line and where
     /// the base is. They are scene components, not world objects, so nothing else lists them.
     /// </summary>
+    private const string BasePointId = "capture_point_base";
+
     private static void AddCapturePoints(Vector3 from)
     {
         try
@@ -600,9 +674,10 @@ internal static class Navigator
 
                 var owner = point.OwnedByTeam == LazyConsts.Fighting.TeamType.Player ? Loc.Get("mil.owner_ours") : Loc.Get("mil.owner_theirs");
                 var label = Loc.Fmt("mil.point_label", MilitaryReader.PointName(point), owner, Mathf.RoundToInt(100f * point.CurrentProgress));
+                if (FightAnnouncer.IsLocked(point)) label = $"{label}, {Loc.Get("mil.locked")}";
                 if (point.enemies.Count > 0 || point.allies.Count > 0)
                     label = $"{label}, {Loc.Fmt("mil.point_occupants", point.allies.Count, point.enemies.Count)}";
-                AllTargets.Add(new NavTarget("capture_point", position, null, "fight_points", label));
+                AllTargets.Add(new NavTarget(ReferenceEquals(point, FightAnnouncer.Level?.BaseCapturePoint) ? BasePointId : "capture_point", position, null, "fight_points", label));
             }
         }
         catch (Exception ex)
@@ -857,6 +932,10 @@ internal static class Navigator
         // their type put them among landmarks; they belong with the workbenches they extend.
         if (IsExtension(id)) return "wgo." + WGODef.InteractionType.Craft;
 
+        // The battlefield's planning table (builder_fight_main) places barricades and starts the
+        // waves; it belongs with the fight, not with the blueprint desks.
+        if (id != null && id.StartsWith("builder_fight", StringComparison.OrdinalIgnoreCase)) return "wgo.FightBuilder";
+
         // Blueprint desks are typed Builder, like every "*_place" build spot, and were lost among them
         // under "building spots".
         if (ObjectNames.IsBuilderDesk(id)) return "desks";
@@ -915,6 +994,15 @@ internal static class Navigator
 
         var previous = _categoryIndex >= 0 && _categoryIndex < Categories.Count ? Categories[_categoryIndex] : null;
 
+        // Entering or leaving a fight swaps the whole set of lists; start again at the top.
+        if (_fightMode != InFight)
+        {
+            _fightMode = InFight;
+            previous = null;
+            _categoryIndex = -1;
+            _objectIndex = -1;
+        }
+
         var present = new HashSet<string>();
         foreach (var target in AllTargets) present.Add(target.CategoryKey);
 
@@ -932,8 +1020,9 @@ internal static class Navigator
     /// <summary>Priority categories first, in <see cref="CategoryPriority"/> order; the rest alphabetically.</summary>
     private static int CompareCategories(string a, string b)
     {
-        var pa = Array.IndexOf(CategoryPriority, a);
-        var pb = Array.IndexOf(CategoryPriority, b);
+        var order = _fightMode ? FightPriority : CategoryPriority;
+        var pa = Array.IndexOf(order, a);
+        var pb = Array.IndexOf(order, b);
         if (pa < 0) pa = int.MaxValue;
         if (pb < 0) pb = int.MaxValue;
         return pa != pb ? pa.CompareTo(pb) : StringComparer.Ordinal.Compare(a, b);
@@ -953,8 +1042,14 @@ internal static class Navigator
             if (target.CategoryKey == wanted) Objects.Add(target);
         }
 
+        // The base leads its list whatever the distance: in the second lost fight (2026-10-03) the
+        // nearest "capture point" was the line point by the far flag stand, walked to as the base.
         Objects.Sort((a, b) =>
-            Flat(a.Position - from).sqrMagnitude.CompareTo(Flat(b.Position - from).sqrMagnitude));
+        {
+            var baseFirst = (b.Id == BasePointId).CompareTo(a.Id == BasePointId);
+            return baseFirst != 0 ? baseFirst
+                : Flat(a.Position - from).sqrMagnitude.CompareTo(Flat(b.Position - from).sqrMagnitude);
+        });
 
         // Same reasoning as the category: hold the selection steady across a rebuild where we can.
         if (!hadSelection) return;
@@ -1091,6 +1186,13 @@ internal static class Navigator
     {
         try
         {
+            // In a fight the objective is the fight's next step (see FightAnnouncer.NextStep).
+            if (InFight)
+            {
+                var step = FightAnnouncer.NextStep();
+                if (step.IsValid) return step;
+            }
+
             var arrow = LazySingleton<UITutorialArrow>.Instance;
             var data = arrow != null && arrow.gameObject.activeSelf ? ArrowTarget(arrow) : null;
 

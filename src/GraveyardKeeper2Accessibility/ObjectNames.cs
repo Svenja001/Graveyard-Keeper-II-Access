@@ -36,10 +36,12 @@ internal static class ObjectNames
         var words = id.Split('_').Where(w => w.Length > 0).ToList();
         if (words.Count > 0 && words[0].Equals("tp", StringComparison.OrdinalIgnoreCase)) return Doorway(words);
 
-        // Fast-travel stones: "teleport_milestone_village".
-        if (words.Count > 2 && words[0].Equals("teleport", StringComparison.OrdinalIgnoreCase) &&
-            words[1].Equals("milestone", StringComparison.OrdinalIgnoreCase))
-            return Loc.Fmt("obj.milestone", PlaceName(words.Skip(2).ToList()));
+        // Fast-travel stones: "teleport_milestone_5_village".
+        if (IsMilestone(words))
+        {
+            var place = MilestonePlace(id);
+            return place == null ? Loc.Fmt("obj.milestone_number", MilestoneNumber(id)) : Loc.Fmt("obj.milestone", place);
+        }
 
         // A single word is looked up in the mod's list only: in the game's text "common" or "bed"
         // alone can be some unrelated UI string.
@@ -58,6 +60,34 @@ internal static class ObjectNames
 
         return kept.Count == 0 ? id : string.Join(" ", kept);
     }
+
+    private static bool IsMilestone(List<string> words) =>
+        words.Count > 2 && words[0].Equals("teleport", StringComparison.OrdinalIgnoreCase) &&
+        words[1].Equals("milestone", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Where a travel stone stands, or null when its id does not say. The ids are numbered -
+    /// <c>teleport_milestone_7_career</c>, <c>teleport_milestone_15</c> - and most of the place
+    /// words match a world zone the game has a name for (<c>wz_sluice_area</c>), so that name comes
+    /// first, in the player's language. "career" is the id's spelling of the quarry, whose zone is
+    /// <c>wz_carrier</c>.
+    /// </summary>
+    internal static string MilestonePlace(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return null;
+        var words = id.Split('_').Where(w => w.Length > 0).ToList();
+        if (!IsMilestone(words)) return null;
+
+        var place = words.Skip(2).Select(w => w.ToLowerInvariant()).Where(w => !Noise.IsMatch(w)).ToList();
+        if (place.Count == 0) return null;
+
+        var zone = string.Join("_", place).Replace("career", "carrier");
+        return GameName("wz_" + zone) ?? PlaceName(place);
+    }
+
+    /// <summary>The number in a travel stone's id - "15" - for the ones with no place in it.</summary>
+    internal static string MilestoneNumber(string id) =>
+        id?.Split('_').FirstOrDefault(w => w.Length > 0 && w.All(char.IsDigit)) ?? id;
 
     /// <summary>A blueprint desk ("Planungstisch"): <c>builder_yard</c>, <c>builder_graveyard</c>, ...</summary>
     internal static bool IsBuilderDesk(string id) =>

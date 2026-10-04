@@ -65,7 +65,8 @@ internal static class TreesReader
         _nextUnlockableKey = ModKeys.Bind(config,
             "Trees", "NextUnlockable", new KeyboardShortcut(KeyCode.C),
             "On the inspiration page: jumps to the next thing you can buy right now - a finished " +
-            "inspiration you have the faith for, or a perk you have the talent points for.");
+            "inspiration you have the faith for, or a perk you have the talent points for, in any talent. On the tech " +
+            "tree: jumps to the next technology your points can learn, in any open branch.");
         _prevUnlockableKey = ModKeys.Bind(config,
             "Trees", "PreviousUnlockable", new KeyboardShortcut(KeyCode.C, KeyCode.LeftShift),
             "The same, backwards.");
@@ -683,34 +684,33 @@ internal static class TreesReader
 
     /// <summary>
     /// C / Shift+C on the inspiration page: moves focus to the next (previous) thing that can be
-    /// bought right now, in reading order - top to bottom, left to right. Not on the tech tree: its
-    /// nodes only exist while scrolled into view, so a jump there would skip what is off screen.
+    /// bought right now, in reading order - top to bottom, left to right. On the tech tree see
+    /// <see cref="CycleLearnableTech"/>.
     /// </summary>
     private static bool CycleUnlockable(CharacterWindow window, int step)
     {
-        if (window.LastOpenedPage != CharacterWindowData.CharPage.Inspiration)
-        {
-            if (window.LastOpenedPage != CharacterWindowData.CharPage.TechTree) return false;
-            Say(Loc.Get("tree.unlockable_insp_only"));
-            return true;
-        }
+        if (window.LastOpenedPage == CharacterWindowData.CharPage.TechTree) return CycleLearnableTech(window, step);
+        if (window.LastOpenedPage != CharacterWindowData.CharPage.Inspiration) return false;
 
         try
         {
-            var candidates = window.GetComponentsInChildren<GamepadNavigationItem>(false)
-                .Where(n => n != null && n.Active && CanBuy(n))
-                .OrderByDescending(n => Mathf.Round(n.transform.position.y))
-                .ThenBy(n => n.transform.position.x)
-                .ToList();
-
-            if (candidates.Count == 0)
-            {
-                Say(Loc.Get("tree.nothing_unlockable"));
-                return true;
-            }
-
+            var candidates = BuyableWidgets(window);
             var focused = UiNarrator.FocusedItem;
             var at = focused == null ? -1 : candidates.IndexOf(focused);
+
+            // Past the last one here (or nothing here): on to the next talent that has something.
+            if (candidates.Count == 0 || (at >= 0 && (at + step < 0 || at + step >= candidates.Count)))
+            {
+                var current = G.CharData(window)?.InspirationPageWidgetData?.TalentData?.id;
+                var next = NextTalentWithPurchase(current, step);
+                if (next != null) return SwitchTalentAndFocus(window, next, step);
+                if (candidates.Count == 0)
+                {
+                    Say(Loc.Get("tree.nothing_unlockable"));
+                    return true;
+                }
+            }
+
             var target = at < 0
                 ? candidates[step > 0 ? 0 : candidates.Count - 1]
                 : candidates[(at + step + candidates.Count) % candidates.Count];
@@ -735,6 +735,152 @@ internal static class TreesReader
         catch (Exception ex)
         {
             Plugin.Log?.LogError($"[Trees] Finding the next unlockable failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        return true;
+    }
+
+    /// <summary>What can be bought on the talent shown, in reading order - top to bottom, left to right.</summary>
+    private static List<GamepadNavigationItem> BuyableWidgets(CharacterWindow window) =>
+        window.GetComponentsInChildren<GamepadNavigationItem>(false)
+            .Where(n => n != null && n.Active && CanBuy(n))
+            .OrderByDescending(n => Mathf.Round(n.transform.position.y))
+            .ThenBy(n => n.transform.position.x)
+            .ToList();
+
+    /// <summary>
+    /// The next open talent after <paramref name="current"/> (before it, for a negative step) that has
+    /// something to buy, read from the save since only the shown talent has widgets. Null when none.
+    /// </summary>
+    private static string NextTalentWithPurchase(string current, int step)
+    {
+        var talents = GameBalance.Me.talentDefs.Select(d => d.id).ToList();
+        var from = talents.IndexOf(current);
+        for (var i = 1; i < talents.Count; i++)
+        {
+            var id = talents[((from + step * i) % talents.Count + talents.Count) % talents.Count];
+            if (id == current || !MainGame.Instance.GameSave.knowledgeSystem.IsTalentBranchUnlocked(id)) continue;
+            if (HasPurchase(MainGame.Instance.GameSave.talentSystemData.GetTalentBranch(id))) return id;
+        }
+        return null;
+    }
+
+    /// <summary>The data side of <see cref="CanBuy"/>, for a talent that is not on screen.</summary>
+    private static bool HasPurchase(TalentData talent)
+    {
+        if (talent == null) return false;
+        var faith = Faith();
+        var inspiration = (talent.activeInspirations ?? new List<InspirationData>()).Any(i =>
+        {
+            if (i.IsHidden || i.isAllLevelsBought || !i.IsCompleted) return false;
+            var price = InspirationDef.GetDataForLevel(i.id, i.curLevel)?.completionPrice ?? 0;
+            return price <= 0 || faith >= price;
+        });
+        return inspiration || GameBalance.Me.talentLevelUpDefs.Any(d =>
+            !d.isZombiePerk && d.talentId == talent.id && talent.GetLevelUpState(d) == TalentLevelUpDef.State.Available);
+    }
+
+    /// <summary>
+    /// Shows another talent the way its tab button does, then focuses its first (or, going
+    /// backwards, last) buyable thing. The page summary names the talent.
+    /// </summary>
+    private static bool SwitchTalentAndFocus(CharacterWindow window, string talentId, int step)
+    {
+        ScreenReader.ClearMenuContext();
+        _skipFocusEcho = true;
+        try
+        {
+            window.SetInspirationPageWithSpecificTalent(talentId);
+        }
+        finally
+        {
+            _skipFocusEcho = false;
+        }
+
+        // The new widgets are laid out at the next canvas update; reading order needs their places now.
+        Canvas.ForceUpdateCanvases();
+        var candidates = BuyableWidgets(window);
+        var controller = window.GetComponentInChildren<GamepadNavigationController>();
+        if (candidates.Count == 0 || controller == null)
+        {
+            Plugin.Log?.LogWarning($"[Trees] Switched to talent '{talentId}' but found nothing to buy on screen.");
+            return true;
+        }
+
+        var target = candidates[step > 0 ? 0 : candidates.Count - 1];
+        controller.ReinitItems(focusOnFirstActive: false);
+        controller.SetFocusedItem(target);
+        Plugin.Log?.LogInfo($"[Trees] Next unlockable: '{target.name}' in talent '{talentId}' ({candidates.Count} there).");
+        return true;
+    }
+
+    /// <summary>True while C switches talent: the focus Speak would repeat is still on the old talent.</summary>
+    private static bool _skipFocusEcho;
+
+    /// <summary>
+    /// C / Shift+C on the tech tree: the next (previous) technology the points on hand can learn,
+    /// across every open branch - this branch first, then the next ones. Read from the definitions,
+    /// not the nodes on screen, which only exist while scrolled into view; the game's own
+    /// <c>DisplayTab(tab, focusOnTech)</c> then switches branch if needed, scrolls and focuses.
+    /// </summary>
+    private static bool CycleLearnableTech(CharacterWindow window, int step)
+    {
+        try
+        {
+            var page = window.TechTreePageWidget;
+            if (page == null) return true;
+            var known = MainGame.Instance.GameSave.knowledgeSystem;
+            var current = G.CurrentTab(page);
+            var tabCount = Enum.GetValues(typeof(TechTreeTab)).Length;
+
+            // Reading order starting at this branch: branch, then column, then top to bottom.
+            int TabRank(TechTreeTab t) => ((int)t - (int)current + tabCount) % tabCount;
+            (int, float, float) Key(TechDef d) => (TabRank(d.tab), d.TreePos.x, -d.TreePos.y);
+
+            var candidates = GameBalance.Me.techDefs
+                .Where(d => d.techDefType == TechDefType.Common && !known.IsTechTabLocked(d.tab) &&
+                            d.TechState == TechState.Available && d.EnoughResources)
+                .OrderBy(Key)
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                Say(Join(Loc.Get("tree.nothing_learnable"),
+                         Loc.Fmt("tree.points", Res("tech_red"), Res("tech_green"), Res("tech_blue"))));
+                return true;
+            }
+
+            var focusedItem = UiNarrator.FocusedItem;
+            var focusedElement = focusedItem == null ? null
+                : focusedItem.GetComponent<LazyScrollableElement>() ?? focusedItem.GetComponentInParent<LazyScrollableElement>();
+            var focused = (focusedElement?.Data as TechTreeElementBaseWidgetData)?.techDef;
+
+            TechDef target;
+            if (focused == null || focused.tab != current)
+            {
+                target = candidates[step > 0 ? 0 : candidates.Count - 1];
+            }
+            else
+            {
+                // From where focus is, so it works whether or not focus is on a learnable one.
+                var at = Key(focused);
+                target = step > 0
+                    ? candidates.FirstOrDefault(d => Key(d).CompareTo(at) > 0) ?? candidates[0]
+                    : candidates.LastOrDefault(d => Key(d).CompareTo(at) < 0) ?? candidates[candidates.Count - 1];
+            }
+
+            if (target == focused)
+            {
+                Say(Join(DescribeTech(target), Loc.Get("tree.only_learnable")));
+                return true;
+            }
+
+            if (target.tab != current) ScreenReader.ClearMenuContext();
+            page.DisplayTab(target.tab, target.id);
+            Plugin.Log?.LogInfo($"[Trees] Next learnable tech: '{target.id}' in {target.tab} ({candidates.Count} in all).");
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log?.LogError($"[Trees] Finding the next learnable tech failed: {ex.GetType().Name}: {ex.Message}");
         }
         return true;
     }
@@ -797,7 +943,7 @@ internal static class TreesReader
         ScreenReader.Say(text);
 
         var focused = UiNarrator.FocusedItem;
-        if (focused != null && window != null && focused.transform.IsChildOf(window.transform) &&
+        if (!_skipFocusEcho && focused != null && window != null && focused.transform.IsChildOf(window.transform) &&
             !string.IsNullOrEmpty(UiNarrator.LastFocusLabel))
             ScreenReader.Say(UiNarrator.LastFocusLabel, interrupt: false);
         UiNarrator.QueueFocusUntil = Time.unscaledTime + 0.6f;

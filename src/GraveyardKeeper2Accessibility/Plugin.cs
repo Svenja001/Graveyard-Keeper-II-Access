@@ -31,6 +31,7 @@ public class Plugin : BaseUnityPlugin
         WorldAnnouncer.Init(Log, Config);
         Navigator.Init(Log, Config);
         AutoWalk.Init(Log, Config);
+        Rescue.Init(Log, Config);
         RouteInfo.Init(Log);
         ObjectStatus.Init(Log);
         QuestReader.Init(Log, Config);
@@ -39,9 +40,11 @@ public class Plugin : BaseUnityPlugin
         StoryRepair.Init(Log, Config);
         ZoneEntry.Init(Log);
         EquipmentAnnouncer.Init(Log);
+        CarryAnnouncer.Init(Log);
         ProgressAnnouncer.Init(Log);
         FightAnnouncer.Init(Log, Config);
         MilitaryReader.Init(Log, Config);
+        TravelMapReader.Init(Log);
         CombatAim.Init(Config);
         WorkSpotCheck.Init(Log);
         BodyWindowsReader.Init(Config);
@@ -183,6 +186,24 @@ public class Plugin : BaseUnityPlugin
         }
         try
         {
+            new Harmony(PluginInfo.Guid + ".carry").PatchAll(typeof(CarryAnnouncer));
+            Log.LogInfo("Patched lifting, dropping and handing over carried items.");
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Patching carried items failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        try
+        {
+            new Harmony(PluginInfo.Guid + ".map").PatchAll(typeof(TravelMapReader));
+            Log.LogInfo("Patched the travel map.");
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Patching the travel map failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        try
+        {
             new Harmony(PluginInfo.Guid + ".aim").PatchAll(typeof(CombatAim));
             Log.LogInfo("Patched melee attacks to aim at the nearest enemy.");
         }
@@ -210,6 +231,8 @@ public class Plugin : BaseUnityPlugin
         ResourceAnnouncer.Update();
         StoryRepair.Update();
         EquipmentAnnouncer.Update();
+        CarryAnnouncer.Update();
+        Rescue.Record();
         FightAnnouncer.Update();
         StationsReader.UpdateFishing();
         WorkSpotCheck.Update();
@@ -229,12 +252,13 @@ public class Plugin : BaseUnityPlugin
             MenuKeys.Update();
             Navigator.Update();
             AutoWalk.Update();
+            Rescue.Update();
             QuestReader.Update();
             StatusKeys.Update();
 
             if (_repeatKey.Value.IsDown() && !NotesReader.TryRepeat() && !BodyWindowsReader.TryRepeat() &&
                 !CraftReader.TryRepeat() && !StationsReader.TryRepeat() && !TreesReader.TryRepeat() &&
-                !BindingsReader.TryRepeat() && !VendorReader.TryRepeat())
+                !BindingsReader.TryRepeat() && !VendorReader.TryRepeat() && !TravelMapReader.TryRepeat())
                 UiNarrator.RepeatFocus();
         }
         catch (Exception ex)

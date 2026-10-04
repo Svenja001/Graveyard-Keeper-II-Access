@@ -38,9 +38,15 @@ internal static class CutsceneAnnouncer
             _inCutscene = started;
             Plugin.Log?.LogInfo($"[Cutscene] {(started ? "started" : "ended")} ({type}).");
 
+            // Only the pre-rendered scenes (CinematicsSceneDisplayManager) can be skipped: holding
+            // Escape for three seconds fills UICinematicsSkipWidget. In-engine cutscenes cannot.
+            var key = !started ? "cutscene.ended"
+                : type == HudStateType.CinematicsScene ? "cutscene.started_skippable"
+                : "cutscene.started";
+
             // Queued rather than interrupting: a cutscene almost always begins or ends next to a
             // line of dialogue, and the line matters more than the announcement.
-            ScreenReader.Say(Loc.Get(started ? "cutscene.started" : "cutscene.ended"), interrupt: false);
+            ScreenReader.Say(Loc.Get(key), interrupt: false);
         }
         catch (Exception ex)
         {

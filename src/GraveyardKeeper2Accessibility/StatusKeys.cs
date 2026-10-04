@@ -13,7 +13,7 @@ namespace GraveyardKeeper2Accessibility;
 ///   <item><b>P</b> - red, green and blue tech points, and town happiness</item>
 ///   <item><b>Q</b> - day of the week, day number and time (the day wheel)</item>
 ///   <item><b>G</b> - the zone you are in and its rating (the zone label)</item>
-///   <item><b>Y</b> - the four hotbar slots</item>
+///   <item><b>Y</b> - what is carried overhead, then the four hotbar slots</item>
 ///   <item><b>O</b> - full details of the focused item, or the tooltip on screen again</item>
 /// </list>
 ///
@@ -49,7 +49,7 @@ internal static class StatusKeys
         _zoneKey = ModKeys.Bind(config, "Keys", "Zone", new KeyboardShortcut(KeyCode.G),
             "Says the zone you are standing in and its rating.");
         _hotbarKey = ModKeys.Bind(config, "Keys", "Hotbar", new KeyboardShortcut(KeyCode.Y),
-            "Says what is in the four hotbar slots.");
+            "Says what you carry overhead, then what is in the four hotbar slots.");
         _detailsKey = ModKeys.Bind(config, "Keys", "ItemDetails", new KeyboardShortcut(KeyCode.O),
             "Full details of the focused item, or reads the tooltip on screen again.");
     }
@@ -269,14 +269,19 @@ internal static class StatusKeys
         var player = ResourceAnnouncer.CurrentPlayer();
         if (player == null) { NotInGame(); return; }
 
+        // What is held overhead comes first: it is the other thing in the player's hands, and the
+        // only place a carried crate is said once the pickup line has gone by.
+        var carried = player.HasOverheadItem ? CarryAnnouncer.Describe() : null;
+
         var pinned = player.pinnedItems;
         if (pinned == null || pinned.Length == 0)
         {
-            Say(Loc.Get("status.hotbar_empty"));
+            Say(carried == null ? Loc.Get("status.hotbar_empty") : carried + ". " + Loc.Get("status.hotbar_empty"));
             return;
         }
 
         var parts = new List<string>();
+        if (carried != null) parts.Add(carried);
         for (var i = 0; i < pinned.Length; i++)
         {
             var id = pinned[i];

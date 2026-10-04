@@ -274,6 +274,10 @@ internal static class MilitaryReader
     [HarmonyPostfix]
     private static void Lost(FightLoseWindow __instance) => SayEnd(EndData(__instance), "mil.lost", rewards: false);
 
+    [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.FinishAsLost))]
+    [HarmonyPrefix]
+    private static void BeforeLoss() => FightAnnouncer.RecordLoss();
+
     [HarmonyPatch(typeof(FightDeadWindow), nameof(FightDeadWindow.Redraw))]
     [HarmonyPostfix]
     private static void Died(FightDeadWindow __instance) => SayEnd(EndData(__instance), "mil.died", rewards: false);
@@ -288,6 +292,7 @@ internal static class MilitaryReader
             _saidEnd = data;
             var name = data.FightDefinition == null ? "" : TmpText.Clean(LLBase.L(data.FightDefinition.id));
             var line = Loc.Fmt(key, name);
+            if (key == "mil.lost" && FightAnnouncer.LossReason != null) line = $"{line}. {FightAnnouncer.LossReason}";
             if (rewards && data.FightDefinition != null && data.FightDefinition.rewards.Count > 0)
                 line = $"{line}. {Loc.Fmt("mil.rewards", string.Join(", ", data.FightDefinition.rewards.Select(r => $"{r.GetCount()} {ItemText.Name(r.id)}")))}";
             line = $"{line}. {Loc.Get("mil.enter_closes")}";
@@ -378,16 +383,17 @@ internal static class MilitaryReader
 
             var zombie = MainGame.ZombieSystemData.GetZombie(dock.OccupiedBy);
             if (zombie == null) continue;
-            var hand = zombie.Hand;
+            // Weapons have their own slot since the 2026-10-02 update; Hand now holds only tools.
+            var weapon = zombie.Weapon;
             var armor = zombie.Armor;
-            var armed = !hand.IsEmpty && (hand.Definition.type == ItemType.Pike || hand.Definition.type == ItemType.Bow);
+            var armed = !weapon.IsEmpty && (weapon.Definition.type == ItemType.Pike || weapon.Definition.type == ItemType.Bow);
             var armored = !armor.IsEmpty && armor.Definition.type == ItemType.BodyArmor;
-            weapons.Add(armed ? hand.Definition.type : ItemType.None);
+            weapons.Add(armed ? weapon.Definition.type : ItemType.None);
             armors.Add(armored ? ItemType.BodyArmor : ItemType.None);
             if (armed && armored)
             {
                 info.Ready++;
-                info.Power += hand.Definition.quality + armor.Definition.quality;
+                info.Power += weapon.Definition.quality + armor.Definition.quality;
             }
         }
         info.Equipment = mercenary ? null : Equipment(weapons, armors);
@@ -497,8 +503,25 @@ internal static class MilitaryReader
     {
         var player = MainGame.PlayerController;
         var carried = player == null ? null : player.attachedWgo;
-        return carried != null && carried.Data?.Definition != null && carried.Data.Definition.interactionType == WGODef.InteractionType.Flag ? carried : null;
+        if (carried == null || carried.Data?.Definition == null) return null;
+
+        // The game's flag stand only asks whether something is attached. The type test alone
+        // never matched in seven fights (2026-10-03): the banner is not typed Flag, so "you carry
+        // the flag" was never said and F5 sent the player to the base mid-carry. Its id is logged
+        // once, to pin the test down.
+        var id = carried.Data.id ?? "";
+        var isFlag = carried.Data.Definition.interactionType == WGODef.InteractionType.Flag
+            || id.IndexOf("flag", StringComparison.OrdinalIgnoreCase) >= 0
+            || id.IndexOf("banner", StringComparison.OrdinalIgnoreCase) >= 0;
+        if (_loggedCarried != id)
+        {
+            _loggedCarried = id;
+            _log?.LogInfo($"[Military] Carrying '{id}' (type {carried.Data.Definition.interactionType}); counted as a flag: {isFlag}.");
+        }
+        return isFlag ? carried : null;
     }
+
+    private static string _loggedCarried;
 
     internal static string CarriedFlagText()
     {
@@ -526,10 +549,13 @@ internal static class MilitaryReader
     internal static string PointName(FightingCapturePoint point)
     {
         if (point == null) return null;
-        if (point.isBasePoint) return Loc.Get("mil.base_point");
+        var level = FightAnnouncer.Level;
+        var isMainBase = level == null ? point.isBasePoint : ReferenceEquals(point, level.BaseCapturePoint);
+        if (isMainBase) return Loc.Get("mil.base_point");
         var sector = point.Sector;
-        if (sector == null || sector.fightingLine == null) return Loc.Get("mil.point");
-        return Loc.Fmt("mil.point_named", sector.fightingLine.lineIdx + 1, sector.sectorIdx + 1);
+        if (sector == null || sector.fightingLine == null) return Loc.Get(point.isBasePoint ? "mil.goal_point" : "mil.point");
+        // A line point the game also calls a base must be ours when the time runs out.
+        return Loc.Fmt(point.isBasePoint ? "mil.goal_point_named" : "mil.point_named", sector.fightingLine.lineIdx + 1, sector.sectorIdx + 1);
     }
 
     // ---- readiness key ----------------------------------------------------------------------

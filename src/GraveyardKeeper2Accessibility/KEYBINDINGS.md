@@ -18,9 +18,10 @@ Version 0.1.0. This file ships beside the mod so the keys can be found without a
 | **Shift+F4** | Fight readiness, anywhere: your total defence power, the barricades and towers at the base, the mercenaries, and each zombie squad with how many zombies it has and how many are ready to fight. Also what the last fight you looked at asked for. |
 | **Ctrl+Enter** | In the pre-fight window (after choosing a fight at Herbert), and in the fight builder's window on the battlefield: **starts the fight.** The game only offers this on a controller. |
 | **Ctrl+Backspace** | In the fight builder's window on the battlefield: ends the preparation and leaves without fighting. |
-| **F3** | Says where the current objective is — whatever the game's tutorial arrow points at; if there is no arrow, the nearest object the story is waiting for you to use; failing both, your current task. |
+| **F3** | Says where the current objective is — whatever the game's tutorial arrow points at; if there is no arrow, the nearest object the story is waiting for you to use; failing both, your current task. **In a fight:** the next step instead — fetch the banner, put it on the flag stand at the next point, stand on the base, or get back to the base when enemies are taking it. |
 | **F5** | **Walks you to that objective.** Press again to stop. Autowalk does nothing while a story scene is moving you: it says to wait. |
 | **Ctrl+F5** | **Emergency: take your controls back.** First press says whether the game is holding them, and why (story scene, cutscene, …). A second press within 5 seconds forces them back. Only for when a scene has clearly ended and nothing but the mod's keys works. |
+| **Ctrl+Shift+F5** | **Emergency: get me out of here.** For when you are stuck, wedged in somewhere, or have fallen out of the world. Takes you back to the last safe place you stood (noted every second while you stand on solid, mapped ground), or to the home travel stone if there is none. First press says where; a second press within 5 seconds goes. Not during fights or while a scene holds your controls (use Ctrl+F5 first). |
 | **F8** | Says the currently focused menu control again. |
 
 ## Fights
@@ -62,7 +63,7 @@ and Z, because R, P and Q are the game's own keys here (rotate, inspirations, qu
 | **L** | Red, green and blue tech points, and town happiness. |
 | **Z** | Day of the week, day number and time of day. |
 | **G** | The zone you are standing in and its rating — the graveyard's quality, for example. |
-| **Y** | What is in the four hotbar slots, and how many of each you are carrying. |
+| **Y** | What you carry overhead (and, for a supply crate, where it goes), then what is in the four hotbar slots and how many of each you are carrying. |
 | **O** | In a window: full details of the focused item — name, stars, how many you have, and its tooltip or description. Anywhere else a tooltip is showing, reads it again in full. |
 
 The game shows the time only as a sun and moon moving round a wheel, with no clock. The time the
@@ -167,6 +168,12 @@ arrow into it; **F6** jumps to the next one. Every item says its price. **Space*
 item into the deal (or takes it back out), and after each change you hear what the deal comes to
 ("You get 3 bronze" / "You pay …") or why it cannot go through. **F** accepts the deal, **F8**
 says the whole deal again, **Escape** empties the deal, or closes the window when it is empty.
+
+**Travel map** (E at a travel stone): says the stone you are at and how many places you can travel
+to, then the first one. Only stones you have already unlocked are offered. Up / Down arrow (or Left
+/ Right) go through them in alphabetical order — "Quarry, 240 metres: 200 north, 130 west" —
+Home and End jump to the first and last, and a letter jumps to the next place starting with it.
+**Enter** travels there, **Escape** closes the map without travelling, F8 repeats the current place.
 
 **Hotbar slot window** ("put on the hotbar" in an item's menu, Shift+F10): says the item and what the
 four slots hold. Arrows choose a slot, **Enter** or **1 – 4** puts the item there, **Escape** leaves
@@ -283,7 +290,7 @@ map. The page is named when it comes up; **F8** says the page summary again.
 | **Ctrl+Left / Ctrl+Right** | On the tech tree: previous / next branch (building, metallurgy, …). On the inspiration page: previous / next talent. |
 | **Arrow keys** | Move around the tree. The tree is laid out left to right, so Right usually goes to what comes next. |
 | **Enter** | On a technology: open it. In the opened technology: unlock it. On an inspiration or a perk: buy it. |
-| **C / Shift+C** | On the inspiration page: jump to the next / previous thing you can buy right now — a finished inspiration you have the faith for, or a perk you have the talent points for. Says so when there is nothing. |
+| **C / Shift+C** | On the inspiration page: jump to the next / previous thing you can buy right now — a finished inspiration you have the faith for, or a perk you have the talent points for, across all your talents (this talent first; switches talent when needed). On the tech tree: jump to the next / previous technology your points can learn, across all open branches (this branch first; switches branch when needed). Says so when there is nothing. |
 
 **Tech tree.** Each branch starts with how many technologies it has, how many you have learned, how
 many you could learn right now, and your red, green and blue points. Each technology says whether

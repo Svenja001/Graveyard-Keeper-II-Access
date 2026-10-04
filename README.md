@@ -115,11 +115,9 @@ the game's own event for it, exactly as walking in would have.
 
 ## Known limitations
 
-- **Fights are not tested yet.** The intro fight works — it cannot be lost, and the mod tells you
-  when it starts and ends. Everything for the real squad fights is built (barracks, the pre-fight
-  window, preparing the battlefield, flags, fight status on F4, aiming at the nearest enemy), but
-  none of it has been played yet. Not done at all: equipping zombies with pikes and armour, aiming
-  the bow, and how much of a fight's waves are left.
+- **Only the first squad fight has been played.** "Break Through to the Port" was won with the mod
+  alone; later fights, with more squads and other battlefields, are not tested yet. Not done at
+  all: aiming the bow.
 - **Nothing about factories is tested yet.** Expect gaps there.
 - **Auto-walk can still fail.** Sometimes it says there is no route where there is one —
   across some bridges and doors, or in rooms the game has no walking map for (the mod builds one
@@ -127,8 +125,7 @@ the game's own event for it, exactly as walking in would have.
   can do the rest from there. Auto-walk refuses to start while a story scene is moving you.
 - **If a scene ends and only the mod's keys still work,** press Ctrl+F5 twice to take your controls
   back. That should not happen any more, but it is there in case it does.
-- **Not covered yet:** the map and fast travel, and anything said about height differences or
-  ladders on the way.
+- **Not covered yet:** the map page in the character window (only the travel stone's map is read).
 - **A game bug, not the mod:** in a German game, the first two main menu entries are read in
   Russian. That is what the game itself has in that place.
 - Only Windows and the Steam version have been tried.

@@ -1,7 +1,8 @@
 ## 0.1.0
 
 **The first release. Graveyard Keeper 2 can be played from a new game through the intro to the
-first save, and well beyond it, with a screen reader and the keyboard alone.** Fights and factories
+first save, and well beyond it, with a screen reader and the keyboard alone.** That includes the
+first real squad fight, "Break Through to the Port", won by a blind player without help. Factories
 are built in but not yet tested — see *Known limitations* in the README.
 
 ### Speech and menus
@@ -24,7 +25,8 @@ are built in but not yet tested — see *Known limitations* in the README.
 
 - **Dialogue is read line by line**, with the speaker named when it changes. Answers are read as a
   list before you choose, and an answer you cannot pick says why and what it would cost.
-- **Cutscene text and story cards are read.**
+- **Cutscene text and story cards are read.** A cutscene that can be skipped says so: hold Escape
+  for three seconds.
 - **J says what each quest is actually waiting for** — "go to …", "use …", "destroy …" — and what is
   still missing first, such as armour not equipped.
 - **Story steps the game missed are repaired.** When you stand where the story waits for you but
@@ -53,8 +55,27 @@ are built in but not yet tested — see *Known limitations* in the README.
   scene is moving you.
 - **Rooms the game gives no walking map, such as the guard barracks,** work too: the mod maps the
   room's floor itself when you walk in, so the object list, routes and auto-walk work inside.
+- **Fast travel:** pressing E at a travel stone opens the map, which now says where you are and
+  lists the stones you have unlocked — only those — each with its distance and direction. Arrows
+  choose, a letter jumps to the next place starting with it, Enter travels, Escape closes.
 - **Ctrl+F5 takes your controls back** if a scene ever leaves you stuck.
+- **Ctrl+Shift+F5 gets you out of anywhere**: stuck, wedged in, or fallen out of the world, it takes
+  you back to the last safe place you stood, or to the home travel stone. Press twice to confirm.
 - **What you walk up to is named**, with what E and F do there, and why an action is not available.
+- **Carrying things overhead is spoken.** Lifting a log, a body or a supply crate says what you now
+  carry; putting it down, on the ground or into something, says that too. Y starts with what is on
+  your head. A supply crate also says where it goes (the delivery pallets in the Town Warehouse),
+  whether an accepted order wants it, and if none does, that orders are accepted at the order board
+  on the Day of Pride. While you carry one, the pallets that take it are in the story list.
+- **Ladders on the way are handled.** When what you walk to is on another level, auto-walk takes you
+  to the ladder, tells you to press E and hold Up or Down, and walks on by itself once you are off
+  it. The warehouse order board, up on its platform, can now be reached.
+- **Auto-walk never starts where the map has no floor under you** — on a platform it does not cover,
+  for example. It says so instead of walking you off the edge. Raised floors inside rooms, such as
+  the warehouse platform by the side door, now have a map of their own.
+- **The order board is read**: every slot and every trader's order says what it wants, how much is
+  already on the delivery pallets, the reward, whether it is urgent, locked or done, and what Enter
+  does.
 
 ### Your situation
 
@@ -82,13 +103,19 @@ are built in but not yet tested — see *Known limitations* in the README.
   fuel stores — are read in full: recipes, ingredients against what you hold, energy, time, mastery,
   the queue. F makes it, Space queues it, the queue can be reordered.
 - **The recipe book (Foliant)** can be paged and is read.
-- **Holding F where nothing happens** says why: every work spot is blocked by another building, a
-  tool is missing, or a worker is busy.
+- **Holding F where nothing happens** says why: you carry several things overhead, every work spot
+  is blocked, a tool is missing or worn out, a worker is busy, no job in the queue can start, or
+  energy, insanity or mastery fall short. If the game gives none of these reasons, the mod says
+  what state the station is in.
 - **Building:** costs, then placing with the arrow keys, with Space or End jumping to the next free
   spot. It says what is in the way, keeps room for a workbench's add-ons, and tells you whether an
-  add-on is connected to its workbench.
+  add-on is connected to its workbench. A new workbench is offered first right against an add-on
+  left standing alone, so a replaced anvil joins the old one's bucket. When the materials have run out or the building's limit
+  is reached, it says so and names what is missing, instead of saying there is no room.
 - **Remove mode** works: pick a building, Enter marks it for demolition.
-- **Tech tree and inspirations** are read and can be bought from the keyboard.
+- **Tech tree and inspirations** are read and can be bought from the keyboard. C jumps to the
+  next thing you can buy right now, in any talent; on the tech tree, the next technology your points can learn
+  in any open branch.
 
 ### The graveyard and the morgue
 
@@ -99,9 +126,36 @@ are built in but not yet tested — see *Known limitations* in the README.
   are read and usable.
 - **Fishing:** the bait window, and spoken cues for every stage of reeling in.
 
-### Fights (untested)
+### Fights
 
-- The intro fight works: the mod says when it starts and ends.
-- Built, not yet played: squads in the barracks, the pre-fight window (Ctrl+Enter starts), preparing
-  the battlefield, flags and capture points in the object list, fight status on F4 and readiness on
-  Shift+F4, announcements during a fight, and swings that aim at the nearest enemy.
+The first squad fight, "Break Through to the Port", has been played and won with the mod alone.
+
+- **The goal is said at the start:** how long the fight lasts, that the base must still be yours
+  when the time runs out, and which capture points you must take, in the order the game allows.
+  A point that cannot be taken yet says "locked, take the point before it first".
+- **F3 says the next step and F5 walks you there:** fetch the banner, put it on the flag stand at
+  the next point, stand on the base while your squad takes the point, or get back to the base when
+  enemies are taking it. The next step is also said by itself when a point changes hands or you
+  move the banner.
+- **Waves are announced** with how many enemies come and where: "Wave: 6 enemies, 30 metres from the
+  base: 31 east, 4 south, near the target point".
+- **"3 enemies on you"** when enemies are within reach, with the nearest one's direction and that
+  Space attacks. Swings turn towards the nearest enemy.
+- **Standing on the base is said** ("You are standing on the base" / "Left the base"), because only
+  being inside its small circle keeps the enemies from taking it. When enemies are on the base and
+  none of yours, the warning says so and what to do.
+- **Health warnings name your healing potion** and its hot-bar key once you are at half health or
+  below, and every hot-bar key in a fight says whether it worked.
+- **Time left** is said each minute and at 30 seconds; F4 adds it to the fight status, along with the
+  state of every point you must take.
+- **The real reason for a loss** is said in the lose window: the base was taken, time ran out with a
+  point still the enemy's, or you fell.
+- **During a fight the object list shrinks to what matters:** capture points (the base always
+  first), enemies with their health, your own squads and where they stand, flag stands, banners,
+  barricades and the planning table.
+- **The pre-fight window and the battlefield's planning table** are read, Ctrl+Enter starts the
+  fight and the waves, and barricades are placed through the planning table like any building.
+- **Barricades in the barracks** can all be placed: free spots are found on the tightly packed
+  barricade area, corner spots first, and the mod says when a barricade has to be turned with R.
+- **Also:** squads in the barracks, readiness on Shift+F4, and the intro fight, which says when it
+  starts and ends.

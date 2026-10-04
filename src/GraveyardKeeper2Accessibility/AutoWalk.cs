@@ -102,13 +102,35 @@ internal static class AutoWalk
     /// started from <see cref="Update"/>, never from the arrival callback: the game calls
     /// <c>OnPathComplete</c> right after that callback, which would undo a path started inside it.
     /// </summary>
-    private enum Leg { None, ToBridge, Crossing }
+    private enum Leg { None, ToBridge, Crossing, ToLadder, AtLadder }
     private static Leg _leg;
     private static bool _nextLegDue;
     private static NavTarget _finalTarget;
     private static BridgeCrossing.Span _span;
     private static int _bridgesCrossed;
     private const int MaxBridges = 3;
+
+    /// <summary>
+    /// A walk to another level runs in legs too: to the foot (or head) of the ladder, then a wait
+    /// while the player climbs - E, then Up or Down, which the mod leaves to them - and on from the
+    /// other end once the climb is over. See <see cref="LadderRoute"/>.
+    /// </summary>
+    private static LadderRoute.Link _ladder;
+    private static int _laddersClimbed;
+    private static bool _climbSeen;
+    private static float _ladderSince;
+    private static float _ladderCheckAt = -1f;
+
+    /// <summary>
+    /// Stand points at the ladder, best first, and the one in use. As at any object, the game may
+    /// pick nothing from the first: the last step of the path decides the facing. Reported
+    /// (2026-10-04): a walk straight to the ladder worked on its second or third spot, but the
+    /// ladder leg of a walk to the order board stopped at the first, where E reached nothing.
+    /// </summary>
+    private static List<InteractionSpot.Spot> _ladderSpots;
+    private static int _ladderSpotIndex;
+    private const int MaxLadders = 3;
+    private const float LadderPatience = 180f;
 
     /// <summary>
     /// The walk we have asked for but which has not started moving yet, and when we asked.
@@ -224,6 +246,12 @@ internal static class AutoWalk
                 Face();
             }
 
+            if (_leg == Leg.AtLadder)
+            {
+                WatchLadder();
+                return;
+            }
+
             // A menu opened meanwhile clears the game's target; check once it is closed again.
             if (_verifyAt >= 0f && MainGame.PlayerController != null && !MainGame.PlayerController.IsControlsEnabled)
                 _verifyAt = Mathf.Max(_verifyAt, Time.unscaledTime + VerifyDelay);
@@ -259,7 +287,7 @@ internal static class AutoWalk
             return;
         }
 
-        if (_walking || _pending.IsValid || _nextLegDue)
+        if (_walking || _pending.IsValid || _nextLegDue || _leg == Leg.AtLadder)
         {
             Stop(Loc.Get("walk.stopped"));
             return;
@@ -277,6 +305,7 @@ internal static class AutoWalk
         ResetLegs();
         ResetInteraction();
         _bridgesCrossed = 0;
+        _laddersClimbed = 0;
         _interactTarget = target;
         _interactWith = target.Data != null && target.Data.IsInteractable ? target.Data : null;
         Start(target);
@@ -298,6 +327,18 @@ internal static class AutoWalk
             return;
         }
 
+        // No map under the player's feet - a platform the room's map does not cover, the map a
+        // storey below. A walk planned from here is a straight push towards that map, and on
+        // 2026-10-04 it pushed the player off the warehouse platform and out of the world.
+        if (OffMesh(player))
+        {
+            _log?.LogWarning($"[Walk] Not walking to '{target.Id}': no floor on the map under the player at {player.MovablePosition}.");
+            ResetLegs();
+            ResetInteraction();
+            ScreenReader.Say(Loc.Get("walk.off_mesh_refused"));
+            return;
+        }
+
         _destinationName = target.Name;
         _triedFallback = false;
         _faceTowards = target.Position;
@@ -316,6 +357,17 @@ internal static class AutoWalk
                 return;
             }
             _log?.LogInfo($"[Walk] '{target.Id}': no spot found yet that the game picks it from.");
+        }
+
+        // On another level, joined to this one by a ladder: go to the ladder first.
+        if (_laddersClimbed < MaxLadders)
+        {
+            var link = LadderRoute.Find(player, target.Position);
+            if (link.HasValue)
+            {
+                StartLadderLeg(player, target, link.Value);
+                return;
+            }
         }
 
         // A story zone: stop on floor inside it, by the game's own test. Its middle is a point in
@@ -431,7 +483,9 @@ internal static class AutoWalk
             _pending = default;
             var line = _leg == Leg.ToBridge
                 ? Loc.Fmt("walk.started_via_bridge", _destinationName, _span.Name)
-                : Loc.Fmt("walk.started", _destinationName);
+                : _leg == Leg.ToLadder
+                    ? Loc.Fmt(_ladder.Up ? "walk.started_via_ladder_up" : "walk.started_via_ladder_down", _destinationName, _ladder.Name)
+                    : Loc.Fmt("walk.started", _destinationName);
             if (!_quiet)
             {
                 var note = _leg == Leg.None ? RouteNote(movement, _faceTowards ?? target.Position) : null;
@@ -747,14 +801,15 @@ internal static class AutoWalk
     /// True when there is no floor under the player: the navmesh's nearest point is far away or
     /// missing, so no route can start here.
     /// </summary>
-    private static bool OffMesh(PlayerController player)
+    internal static bool OffMesh(PlayerController player)
     {
         try
         {
             var graph = Reachability.FloorGraph(player);
             if (graph == null) return false;
             var nearest = graph.GetNearest(player.MovablePosition);
-            return nearest.node == null || Flat(nearest.position - player.MovablePosition) > 1f;
+            return nearest.node == null || Flat(nearest.position - player.MovablePosition) > 1f ||
+                   Mathf.Abs(nearest.position.y - player.MovablePosition.y) > Reachability.MaxStandGap;
         }
         catch
         {
@@ -834,6 +889,107 @@ internal static class AutoWalk
         _leg = Leg.None;
         _nextLegDue = false;
         _finalTarget = default;
+        _ladder = default;
+        _climbSeen = false;
+        _ladderCheckAt = -1f;
+        _ladderSpots = null;
+        _ladderSpotIndex = 0;
+    }
+
+    /// <summary>Walks to a spot where the game picks the ladder, at the end on the player's level.</summary>
+    private static void StartLadderLeg(PlayerController player, NavTarget target, LadderRoute.Link link)
+    {
+        _finalTarget = target;
+        _ladder = link;
+        _leg = Leg.ToLadder;
+        _faceTowards = link.NearEnd;
+        _faceDirection = null;
+
+        var spots = InteractionSpot.Find(player, link.Data).FindAll(s => Flat(s.Position - link.NearEnd) < 2.5f);
+        _ladderSpots = spots;
+        _ladderSpotIndex = 0;
+        var stand = link.NearEnd;
+        if (spots.Count > 0)
+        {
+            stand = spots[0].Position;
+            _faceDirection = spots[0].Facing;
+        }
+
+        _log?.LogInfo($"[Walk] '{target.Id}' is on another level; going by ladder '{link.Data.id}' from {stand} ({spots.Count} spot(s) the game picks it from).");
+        RequestPath(new NavTarget(link.Data.id + " (ladder)", stand, target.WorldId, target.CategoryKey, target.Label), MovementType.Recast);
+    }
+
+    /// <summary>The next stand point at the ladder, quietly; false when there is none left to try.</summary>
+    private static bool TryNextLadderSpot()
+    {
+        if (_ladderSpots == null || _ladderSpotIndex + 1 >= _ladderSpots.Count || _ladderSpotIndex + 1 >= MaxSpotTries) return false;
+
+        _ladderSpotIndex++;
+        var spot = _ladderSpots[_ladderSpotIndex];
+        _log?.LogInfo($"[Walk] Trying ladder spot {_ladderSpotIndex + 1} of {_ladderSpots.Count} at {spot.Position} facing {spot.Facing}.");
+        _leg = Leg.ToLadder;
+        _faceDirection = spot.Facing;
+        _quiet = true;
+        RequestPath(new NavTarget(_ladder.Data.id + " (ladder)", spot.Position, _finalTarget.WorldId, _finalTarget.CategoryKey, _finalTarget.Label), MovementType.Recast);
+        return true;
+    }
+
+    /// <summary>
+    /// At the ladder: say how to climb, wait for the climb, and walk on from the other end. Moving
+    /// keys do not cancel here - Up and Down are how the player climbs.
+    /// </summary>
+    private static void WatchLadder()
+    {
+        var player = MainGame.PlayerController;
+        if (player == null)
+        {
+            ResetLegs();
+            return;
+        }
+
+        if (_ladderCheckAt >= 0f && Time.unscaledTime >= _ladderCheckAt)
+        {
+            _ladderCheckAt = -1f;
+            var picked = InteractionSpot.CurrentTarget(player, out var wgo);
+            if (wgo != _ladder.Data)
+            {
+                _log?.LogInfo($"[Walk] At ladder '{_ladder.Data?.id}' spot {_ladderSpotIndex + 1}, but the game targets '{picked ?? "nothing"}'.");
+                if (TryNextLadderSpot()) return;
+            }
+            var line = Loc.Fmt(_ladder.Up ? "walk.at_ladder_up" : "walk.at_ladder_down",
+                _ladder.Name, GameKeys.Name(GameKey.Interaction) ?? "E", GameKeys.Name(_ladder.Up ? GameKey.Up : GameKey.Down) ?? (_ladder.Up ? "W" : "S"),
+                _destinationName);
+            if (wgo != _ladder.Data)
+                line += ". " + (string.IsNullOrEmpty(picked) ? Loc.Get("walk.ladder_not_targeted") : Loc.Fmt("walk.ladder_other_targeted", ItemText.Name(picked)));
+            _log?.LogInfo($"[Walk] At ladder '{_ladder.Data?.id}'; the game targets '{picked ?? "nothing"}'.");
+            ScreenReader.Say(line);
+            return;
+        }
+
+        if (LadderRoute.Climbing(player))
+        {
+            _climbSeen = true;
+            return;
+        }
+
+        if (_climbSeen)
+        {
+            var final = _finalTarget;
+            var arrivedUp = Mathf.Abs(player.MovablePosition.y - _ladder.FarEnd.y) < 1.2f;
+            _log?.LogInfo($"[Walk] Climb over at {player.MovablePosition}; {(arrivedUp ? "on the target's level" : "not on the target's level")}.");
+            ResetLegs();
+            if (!arrivedUp || !final.IsValid) return;
+
+            _laddersClimbed++;
+            Start(final);
+            return;
+        }
+
+        if (Flat(player.MovablePosition - _ladder.NearEnd) > 4f || Time.unscaledTime - _ladderSince > LadderPatience)
+        {
+            _log?.LogInfo($"[Walk] Gave up waiting at ladder '{_ladder.Data?.id}': the player walked away or took too long.");
+            ResetLegs();
+        }
     }
 
     /// <summary>
@@ -847,6 +1003,17 @@ internal static class AutoWalk
         if (movement == null)
         {
             ResetLegs();
+            return;
+        }
+
+        if (_leg == Leg.ToLadder)
+        {
+            _leg = Leg.AtLadder;
+            _ladderSince = Time.unscaledTime;
+            _ladderCheckAt = Time.unscaledTime + VerifyDelay;
+            _climbSeen = false;
+            Face();
+            _faceAgain = true;
             return;
         }
 
@@ -1004,7 +1171,7 @@ internal static class AutoWalk
         }
     }
 
-    private static string ControlName(TakenControlType type) => type switch
+    internal static string ControlName(TakenControlType type) => type switch
     {
         TakenControlType.ByFlow => Loc.Get("control.by_flow"),
         TakenControlType.ByCinematics => Loc.Get("control.by_cinematics"),
@@ -1013,6 +1180,12 @@ internal static class AutoWalk
         TakenControlType.ByDeath => Loc.Get("control.by_death"),
         _ => type.ToString(),
     };
+
+    /// <summary>True while a walk, or one of its legs, is under way.</summary>
+    internal static bool IsBusy => _walking || _pending.IsValid || _nextLegDue || _leg != Leg.None || _verifyAt >= 0f;
+
+    /// <summary>Drops the walk without a word, for the rescue key.</summary>
+    internal static void Cancel() => Stop(null);
 
     private static void Stop(string message)
     {

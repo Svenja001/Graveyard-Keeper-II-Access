@@ -201,6 +201,9 @@ internal static class BuildingReader
     private static List<Vector3> _spots;
     private static int _spotIndex;
 
+    /// <summary>True when <see cref="_spots"/> are exact pointer positions (full-cover areas), not points to snap.</summary>
+    private static bool _spotsExact;
+
     /// <summary>True while the game is in placement mode; the plugin keeps the navigation keys off meanwhile.</summary>
     internal static bool Active => _controller != null && _controller.IsBuildModeActive;
 
@@ -452,6 +455,8 @@ internal static class BuildingReader
         if (marked) parts.Add(Loc.Get("build.remove_marked"));
         var extension = ObjectStatus.Extension(wgo.Data);
         if (extension != null) parts.Add(extension);
+        var goesWith = SlotAddOnsOf(wgo.Data);
+        if (goesWith.Count > 0) parts.Add(Loc.Fmt("build.remove_takes_addons", string.Join(", ", goesWith)));
         if (_removables != null && _removableIndex >= 0 && _removableIndex < _removables.Count && ReferenceEquals(_removables[_removableIndex], wgo))
             parts.Add(Loc.Fmt("build.remove_position", _removableIndex + 1, _removables.Count));
 
@@ -464,6 +469,34 @@ internal static class BuildingReader
         }
         parts.Add(Loc.Get(marked ? "build.remove_key_unmark" : "build.remove_key"));
         ScreenReader.Say(string.Join(", ", parts), interrupt);
+    }
+
+    /// <summary>
+    /// The add-ons sitting in a workbench's slots (the bellows on a furnace). The game tears them
+    /// down with it and drops their materials (<c>WgoData.RemoveFullCoverSoftSlotExtensions</c>);
+    /// the user took down a Schmelzofen I and then looked in vain for its bellows (2026-10-04).
+    /// </summary>
+    private static List<string> SlotAddOnsOf(WgoData data)
+    {
+        var names = new List<string>();
+        try
+        {
+            var world = MainGame.Instance?.GameSave?.WorldData;
+            if (world == null || data.AttachedWorkbenchExtensions == null) return names;
+            foreach (var guid in data.AttachedWorkbenchExtensions)
+            {
+                var ext = world.GetWgoData(guid);
+                if (ext == null || string.IsNullOrEmpty(ext.id)) continue;
+                if (!GameBalance.Me.buildableWgos.TryGetValue(ext.id, out var building) || building == null) continue;
+                if (building.chooseCustomBuildAreaType != BuildingDef.BuildAreaChoosingType.FullCoverSoft) continue;
+                names.Add(ObjectNames.Of(ext.id));
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not read slot add-ons of '{data.id}': {ex.Message}");
+        }
+        return names;
     }
 
     private static bool IsMarked(Wgo wgo)
@@ -536,6 +569,15 @@ internal static class BuildingReader
         return CanBuildHere();
     }
 
+    /// <summary>Puts the pointer at an exact position, without the grid snap of <see cref="MoveTo"/>.</summary>
+    private static bool MoveExact(Vector3 position)
+    {
+        LastSnapped(_controller) = position;
+        LastCursor(_controller) = CameraSystem.WorldToScreenPoint(position);
+        _controller.UpdatePointerObjectPosition(position);
+        return CanBuildHere();
+    }
+
     private static bool CanBuildHere()
     {
         var pointer = Pointer(_controller);
@@ -575,9 +617,249 @@ internal static class BuildingReader
     private static string StateText()
     {
         if (CanBuildHere()) return Loc.Get("build.free");
-        var extension = PlacingExtension(CurrentBuild(_controller));
-        var names = PointerBlockers(extension == null ? null : ConnectedHosts(extension));
+        var unpaid = CannotPayText();
+        if (unpaid != null) return unpaid;
+        var def = CurrentBuild(_controller)?.Definition;
+        List<string> names;
+        if (def != null && def.chooseCustomBuildAreaType == BuildingDef.BuildAreaChoosingType.FullCoverSoft)
+            names = SlotBlockers(out _);
+        else
+        {
+            var extension = PlacingExtension(CurrentBuild(_controller));
+            names = PointerBlockers(extension == null ? null : ConnectedHosts(extension));
+        }
         return names.Count == 0 ? Loc.Get("build.blocked") : Loc.Fmt("build.blocked_by", string.Join(", ", names));
+    }
+
+    private static readonly MethodInfo CoveredSlot = AccessTools.Method(typeof(WgoBuildPointer), "TryGetCoveredFullCoverSoftBuildArea");
+
+    /// <summary>
+    /// Why a building that fills a slot (<c>FullCoverSoft</c>: the bellows on a furnace, the
+    /// barracks barricades) is red where the pointer is, by the game's own tests: the pointer must
+    /// cover the whole slot (<c>TryGetCoveredFullCoverSoftBuildArea</c>), every cell must be inside
+    /// the build zone, off no-build areas and on a marked area, and the slot must be empty but for the building that owns it (<c>IsFullCoverSoftSlotFree</c>: layers
+    /// 8, 16, 19). <see cref="PointerBlockers"/> does not fit here - for slot buildings the game
+    /// ignores everything else under the cells - and the slot search said nothing at all: the bellows
+    /// for a new furnace found "no free spot" with no reason (user, 2026-10-04).
+    /// <paramref name="slot"/> is the slot the pointer covers, or null.
+    /// </summary>
+    private static List<string> SlotBlockers(out BuildArea slot)
+    {
+        var names = new List<string>();
+        slot = null;
+        if (!(Pointer(_controller)?.PointerObject is WgoBuildPointer pointer)) return names;
+        void Add(string name)
+        {
+            if (name != null && !names.Contains(name)) names.Add(name);
+        }
+
+        try
+        {
+            var args = new object[] { null };
+            if (CoveredSlot == null || !(bool)CoveredSlot.Invoke(pointer, args))
+            {
+                Add(Loc.Get("build.blocker_not_on_slot"));
+                return names;
+            }
+            slot = (BuildArea)args[0];
+
+            var def = CurrentBuild(_controller)?.Definition;
+            var target = PointerTarget(pointer);
+            var own = PointerOwnColliders(pointer);
+            var owner = slot.GetComponentInParent<Wgo>();
+            var zoneId = _controller.CurrentWorldZone?.Data?.Definition?.id;
+
+            // Per cell, as UpdateSelectionCellsState.
+            var cells = PointerCells(pointer);
+            var mask = PointerMask(pointer);
+            if (cells != null)
+            {
+                foreach (var cell in cells)
+                {
+                    // Buildings under a cell do not count here (the game skips them for slot
+                    // buildings); only the zone, no-build areas and some marked area do.
+                    if (cell == null || cell is BuffCell) continue;
+                    var inZone = false;
+                    var onArea = false;
+                    var count = cell.OverlapBoxNonAlloc(BlockerHits, mask);
+                    for (var i = 0; i < count; i++)
+                    {
+                        var col = BlockerHits[i];
+                        if (col == null) continue;
+                        if (col.gameObject.layer == 29) { Add(Loc.Get("build.blocker_area")); continue; }
+                        if (col.TryGetComponent<WorldZone>(out var zone))
+                        {
+                            if (zone.Data?.Definition?.id == zoneId) inZone = true;
+                            continue;
+                        }
+                        if (own != null && own.Contains(col)) continue;
+                        if (PlacementBlockingArea.TryGet(col, out _))
+                        {
+                            if (PlacementBlockingArea.IsBlockingFor(col, def, target)) Add(Loc.Get("build.blocker_area"));
+                            continue;
+                        }
+                        if (col.TryGetComponent<BuildArea>(out var area) && !area.foprceShowAsBuffAreaForPointerPlacement) onArea = true;
+                    }
+                    if (!inZone) Add(Loc.Get("build.blocker_outside"));
+                    if (!onArea) Add(Loc.Get("build.blocker_not_on_slot"));
+                }
+            }
+
+            // What stands on the slot, as IsFullCoverSoftSlotFree.
+            foreach (var name in SlotOccupants(slot, owner, target, def)) Add(name);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not check the slot: {ex.Message}");
+        }
+        return names;
+    }
+
+    /// <summary>
+    /// What stands on a slot, by the game's <c>IsFullCoverSoftSlotFree</c>: any building but the
+    /// slot's owner and <paramref name="target"/> (the building being placed), temporary objects and
+    /// groups <paramref name="def"/> ignores; a no-build area; a bare wall (layers 8, 16).
+    /// </summary>
+    private static List<string> SlotOccupants(BuildArea slot, Wgo owner, Wgo target, BuildingDef def)
+    {
+        var names = new List<string>();
+        var slotCol = slot.Collider != null ? slot.Collider : slot.GetComponent<Collider>();
+        if (slotCol == null) return names;
+        var b = slotCol.bounds;
+        var half = Vector3.Max(Vector3.zero, b.extents - VisualConsts.XYZ_STEP);
+        var hits = new Collider[20];
+        var count = Physics.OverlapBoxNonAlloc(b.center, half, hits, Quaternion.identity, 590080);
+        for (var i = 0; i < count; i++)
+        {
+            var col = hits[i];
+            if (col == null || col.TryGetComponent<BuildArea>(out _) || col.TryGetComponent<ModuleSlotArea>(out _)) continue;
+            if (col.GetComponentInParent<BuildPointerObject>() != null) continue;
+            string name = null;
+            if (PlacementBlockingArea.TryGet(col, out _))
+            {
+                if (PlacementBlockingArea.IsBlockingFor(col, def, target)) name = Loc.Get("build.blocker_area");
+            }
+            else if (col.GetComponentInParent<Wgo>() is Wgo wgo)
+            {
+                if (wgo == target || wgo == owner || wgo.Data == null || wgo.Data.isTempObject) continue;
+                if (def != null && wgo.Data.Definition != null && def.ShouldIgnoreWgoGroupAsObstacle(wgo.Data.Definition.wgoGroup)) continue;
+                name = ObjectNames.Of(wgo.Data.id);
+            }
+            else if (col.gameObject.layer == 8 || col.gameObject.layer == 16) name = Loc.Get("build.blocker_wall");
+            if (name != null && !names.Contains(name)) names.Add(name);
+        }
+        return names;
+    }
+
+    /// <summary>
+    /// The add-on slots built into a workbench - the marked area a bellows must fill on a furnace
+    /// (an area id that <c>GameBalance.customBuildAreaIdToWgoIds</c> maps to one of its add-ons).
+    /// Such an add-on goes nowhere else, so the room to keep is that slot, not a strip beside it:
+    /// a Schmelzofen II was placed with a sawhorse in its bellows slot while the mod said there was
+    /// room for an add-on (user, 2026-10-04).
+    /// </summary>
+    private static List<BuildArea> AddOnSlots(Wgo workbench)
+    {
+        var result = new List<BuildArea>();
+        if (workbench == null || workbench.Data == null) return result;
+        try
+        {
+            var def = GameBalance.Me.GetWorkbenchExtensionLogicDef(workbench.Data.id);
+            var allowed = def == null ? null : GameBalance.Me.GetAllowedExtensionIdsForParentWorkbench(def.id);
+            foreach (var area in workbench.GetComponentsInChildren<BuildArea>())
+            {
+                if (area == null || string.IsNullOrEmpty(area.Id)) continue;
+                if (!GameBalance.Me.customBuildAreaIdToWgoIds.TryGetValue(area.Id, out var ids) || ids == null) continue;
+                if (ids.Any(id => (allowed != null && allowed.Contains(id)) || GameBalance.Me.IsWorkbenchExtensionId(id))) result.Add(area);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not read add-on slots of '{workbench.Data.id}': {ex.Message}");
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// For the workbench being placed: null when it has no add-on slot, else what stands in any of
+    /// its slots - empty when all are free. Every slot counts: a furnace has one for its bellows and
+    /// one for its casting table, and with "one free is enough" a furnace went up with a sawhorse in
+    /// its bellows slot because the casting table's was free (log of 2026-10-04).
+    /// </summary>
+    private static List<string> PlacingSlotBlockers()
+    {
+        if (!(Pointer(_controller)?.PointerObject is WgoBuildPointer pointer)) return null;
+        var target = PointerTarget(pointer);
+        var slots = AddOnSlots(target);
+        if (slots.Count == 0) return null;
+
+        var names = new List<string>();
+        var zone = _controller.CurrentWorldZone;
+        foreach (var slot in slots)
+        {
+            var reasons = SlotOccupants(slot, target, target, null);
+            var col = slot.Collider != null ? slot.Collider : slot.GetComponent<Collider>();
+            if (col != null && zone != null && zone.ZoneCollider != null)
+            {
+                var zb = zone.ZoneCollider.bounds;
+                var b = col.bounds;
+                if (!zb.Contains(new Vector3(b.min.x, zb.center.y, b.min.z)) || !zb.Contains(new Vector3(b.max.x, zb.center.y, b.max.z)))
+                    reasons.Add(Loc.Get("build.blocker_outside"));
+            }
+            foreach (var r in reasons)
+                if (!names.Contains(r)) names.Add(r);
+        }
+        return names;
+    }
+
+    private static readonly AccessTools.FieldRef<WgoBuildPointer, Func<bool>> PointerCanPay =
+        AccessTools.FieldRefAccess<WgoBuildPointer, Func<bool>>("canTakeResources");
+
+    /// <summary>
+    /// "Not enough materials: ..." or "limit reached" when the game would refuse the building
+    /// anywhere, else null. <c>WgoBuildPointer</c> shows the pointer red whenever its
+    /// <c>canTakeResources</c> fails - the materials ran out after the last one built, or the limit
+    /// is reached - so the spot search found nothing and said it does not fit (user, 2026-10-04).
+    /// The needs and inventory are only held by that delegate's closure.
+    /// </summary>
+    private static string CannotPayText()
+    {
+        try
+        {
+            if (!(Pointer(_controller)?.PointerObject is WgoBuildPointer pointer)) return null;
+            var canPay = PointerCanPay(pointer);
+            if (canPay == null || canPay()) return null;
+
+            var closure = canPay.Target;
+            T Captured<T>(string name) where T : class =>
+                closure == null ? null : AccessTools.Field(closure.GetType(), name)?.GetValue(closure) as T;
+            var def = Captured<BuildingDef>("buildingDef") ?? CurrentBuild(_controller)?.Definition;
+            var needs = Captured<List<NeedItemData>>("itemNeeds");
+            var inventory = Captured<MultiInventory>("multiInventory");
+
+            if (inventory == null || needs == null || inventory.HasItemsById(needs))
+                return def != null && def.HasLimits ? Loc.Fmt("build.limit_reached", def.GetLimitsString()) : Loc.Get("build.cannot_pay");
+
+            var missing = new List<string>();
+            foreach (var need in needs)
+            {
+                if (need == null || need.IsEmpty) continue;
+                var count = need.GetCount();
+                if (need.IsGroup)
+                {
+                    missing.Add(Loc.Fmt("tooltip.need", count, TmpText.Clean(LLBase.L(need.groupType.ToString()))));
+                    continue;
+                }
+                var have = inventory.GetTotalCount(need.id);
+                if (have < count) missing.Add(Loc.Fmt("tooltip.need_have", have, count, ItemText.Name(need.id)));
+            }
+            return missing.Count == 0 ? Loc.Get("build.cannot_pay") : Loc.Fmt("build.no_materials", string.Join("; ", missing));
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not check the building's cost: {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -676,11 +958,81 @@ internal static class BuildingReader
         return result;
     }
 
+    /// <summary>
+    /// The add-ons the workbench being placed would take on where the pointer is - for a workbench
+    /// the game fills the same list with the add-ons under its footprint
+    /// (<c>FillSelectionRectsForParentOverlappingExtensions</c>).
+    /// </summary>
+    private static List<Wgo> ConnectedAddOns()
+    {
+        var result = new List<Wgo>();
+        if (!(Pointer(_controller)?.PointerObject is WgoBuildPointer pointer)) return result;
+        var hosts = OverlappingHosts(pointer);
+        if (hosts == null) return result;
+        foreach (var host in hosts)
+            if (host != null && host.Data != null && GameBalance.Me.IsWorkbenchExtensionId(host.Data.id)) result.Add(host);
+        return result;
+    }
+
+    /// <summary>The add-on ids the workbench being placed takes, or null when it takes none.</summary>
+    private static HashSet<string> AllowedAddOns(BuildData data)
+    {
+        if (data == null || PlacingExtension(data) != null) return null;
+        try
+        {
+            foreach (var id in new[] { data.Definition?.customWgoPlacePreview, data.WgoId })
+            {
+                if (!TakesAddOns(id)) continue;
+                var def = GameBalance.Me.GetWorkbenchExtensionLogicDef(id);
+                return GameBalance.Me.GetAllowedExtensionIdsForParentWorkbench(def.id);
+            }
+        }
+        catch
+        {
+            // Takes none, as far as can be told.
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Add-ons in this zone the workbench being placed could take and that have no workbench,
+    /// nearest the player first. Tearing down an old anvil leaves its hardening
+    /// bucket standing alone; the new anvil belongs right against it, and the free-spot search
+    /// offered only spots around the player - the user built the anvil elsewhere and had to tear
+    /// the bucket down too (2026-10-04).
+    /// </summary>
+    private static List<Wgo> AddOnsToJoin(HashSet<string> allowed, Vector3 playerPos)
+    {
+        var result = new List<Wgo>();
+        if (allowed == null || allowed.Count == 0) return result;
+        var zone = _controller.CurrentWorldZone;
+        var world = MainGame.Instance?.GameSave?.WorldData;
+        foreach (var wgo in Navigator.SpawnedWgos)
+        {
+            if (wgo == null || wgo.Data == null || !allowed.Contains(wgo.Data.id)) continue;
+            if (wgo.GetComponentInParent<BuildPointerObject>() != null) continue;
+            var p = wgo.Data.Position;
+            if (zone != null && zone.ZoneCollider != null
+                && !zone.ZoneCollider.bounds.Contains(new Vector3(p.x, zone.ZoneCollider.bounds.center.y, p.z))) continue;
+            result.Add(wgo);
+        }
+        // Only add-ons standing alone: one still serving another workbench needs nothing new.
+        bool Alone(Wgo w) => w.Data.WorkbenchParents == null || !w.Data.WorkbenchParents.Any(g => world?.GetWgoData(g) != null);
+        return result.Where(Alone).OrderBy(w => Flat(w.Data.Position - playerPos).sqrMagnitude).ToList();
+    }
+
     /// <summary>"connects to wooden anvil" / "not connected, ...", or null when not placing an add-on.</summary>
     private static string LinkText()
     {
         var extension = PlacingExtension(CurrentBuild(_controller));
-        if (extension == null) return null;
+        if (extension == null)
+        {
+            // A workbench set down against an add-on that is already there.
+            var addOns = AllowedAddOns(CurrentBuild(_controller)) != null ? ConnectedAddOns() : null;
+            return addOns != null && addOns.Count > 0
+                ? Loc.Fmt("build.ext_linked", string.Join(", ", addOns.Select(h => ObjectNames.Of(h.Data.id)).Distinct()))
+                : null;
+        }
 
         var hosts = ConnectedHosts(extension);
         return hosts.Count > 0
@@ -709,6 +1061,15 @@ internal static class BuildingReader
 
     private static void NextFreeSpot()
     {
+        // Unpaid, the pointer is red everywhere: say why instead of searching.
+        var unpaid = CannotPayText();
+        if (unpaid != null)
+        {
+            Log?.LogInfo($"[Build] Cannot pay for '{CurrentBuild(_controller)?.WgoId}': {unpaid}");
+            ScreenReader.Say(unpaid);
+            return;
+        }
+
         if (_spots == null)
         {
             _spots = FindFreeSpots();
@@ -718,18 +1079,24 @@ internal static class BuildingReader
 
         if (_spots.Count == 0)
         {
+            if (_coverHint != null)
+            {
+                ScreenReader.Say(_coverHint);
+                return;
+            }
             var extension = PlacingExtension(CurrentBuild(_controller));
             var none = extension == null
                 ? Loc.Get("build.no_free_spot")
                 : Loc.Fmt("build.ext_no_spot", ObjectStatus.ParentNames(extension));
-            if (extension != null && _inTheWay.Count > 0)
+            if (_inTheWay.Count > 0)
                 none = Loc.Fmt("build.in_the_way_long", none, string.Join(", ", _inTheWay));
             ScreenReader.Say(none);
             return;
         }
 
         _spotIndex = (_spotIndex + 1) % _spots.Count;
-        MoveTo(_spots[_spotIndex]);
+        if (_spotsExact) MoveExact(_spots[_spotIndex]);
+        else MoveTo(_spots[_spotIndex]);
         var player = MainGame.PlayerController;
         var cursor = CurPos(_controller);
         var where = player == null ? "" : Navigator.KeyDirections(new Vector2(cursor.x - player.MovablePosition.x, cursor.z - player.MovablePosition.z));
@@ -753,7 +1120,18 @@ internal static class BuildingReader
     /// are counted in the log so the difference shows.
     /// </para>
     /// </summary>
-    private static void AddMarkedAreas(string areaId, WorldZone zone, List<Vector3> candidates)
+    /// <summary>Corners of the marked areas last searched, for offering packed spots first.</summary>
+    private static readonly List<Vector3> AreaCorners = new();
+
+    /// <summary>
+    /// How finely <see cref="AddMarkedAreas"/> covers each area: 0 the centres only, 1 a 3 × 3
+    /// spread, 2 every build-grid cell. Each pass runs only when the one before found nothing:
+    /// the fine grid on all 32 grave plots of the temple graveyard was 3552 points, and the 2500
+    /// placement checks it ran before answering left Space silent for seconds (user, 2026-10-03).
+    /// </summary>
+    private const int AreaPasses = 3;
+
+    private static void AddMarkedAreas(string areaId, WorldZone zone, List<Vector3> candidates, int pass)
     {
         var bounds = zone.ZoneCollider.bounds;
         bool InZone(Vector3 p) => bounds.Contains(new Vector3(p.x, bounds.center.y, p.z));
@@ -767,6 +1145,7 @@ internal static class BuildingReader
         }
 
         var inactive = 0;
+        AreaCorners.Clear();
         foreach (var area in UnityEngine.Object.FindObjectsByType<BuildArea>(FindObjectsInactive.Include, FindObjectsSortMode.None))
         {
             if (area == null || area.Id != areaId) continue;
@@ -780,20 +1159,44 @@ internal static class BuildingReader
             areas.Add(area);
         }
 
+        // The centre, then every build-grid cell over the area and a metre around it. A Soft area
+        // (the barracks barricades) needs every cell of the building on it, and the barracks area
+        // is packed tight: 2.56 x 1.8 m holds two barricades (1.6 x 0.9) side by side and a third,
+        // turned (0.96 x 1.5), in the 0.96 m strip left over - at exactly one position. A 3 x 3
+        // spread, then a grid of every second cell, both missed it (user, 2026-10-03). One cell is
+        // the step the arrow keys move (see Step). Capped at ~60 x 60 per area.
+        var grid = GridStep(_controller);
+        var cellX = Mathf.Max(0.05f, 0.02f * grid.x);
+        var cellZ = Mathf.Max(0.05f, 0.025f * grid.y);
         foreach (var area in areas)
         {
             var b = (area.Collider != null ? area.Collider : area.GetComponent<Collider>()).bounds;
             candidates.Add(VisualConsts.ProjectElevationPointToGround(b.center, zone.GroundPlaneY));
-            for (var i = -1; i <= 1; i++)
-            for (var j = -1; j <= 1; j++)
+            AreaCorners.Add(new Vector3(b.min.x, 0f, b.min.z));
+            AreaCorners.Add(new Vector3(b.min.x, 0f, b.max.z));
+            AreaCorners.Add(new Vector3(b.max.x, 0f, b.min.z));
+            AreaCorners.Add(new Vector3(b.max.x, 0f, b.max.z));
+            if (pass == 0) continue;
+            if (pass == 1)
             {
-                if (i == 0 && j == 0) continue;
-                var p = b.center + new Vector3(i * b.extents.x * 0.6f, 0f, j * b.extents.z * 0.6f);
-                candidates.Add(VisualConsts.ProjectElevationPointToGround(p, zone.GroundPlaneY));
+                for (var i = -1; i <= 1; i++)
+                for (var j = -1; j <= 1; j++)
+                {
+                    if (i == 0 && j == 0) continue;
+                    var p = b.center + new Vector3(i * b.extents.x * 0.6f, 0f, j * b.extents.z * 0.6f);
+                    candidates.Add(VisualConsts.ProjectElevationPointToGround(p, zone.GroundPlaneY));
+                }
+                continue;
             }
+            var stepX = Mathf.Max(cellX, (2f * b.extents.x + 2f) / 60f);
+            var stepZ = Mathf.Max(cellZ, (2f * b.extents.z + 2f) / 60f);
+            for (var x = b.min.x - 1f; x <= b.max.x + 1f; x += stepX)
+            for (var z = b.min.z - 1f; z <= b.max.z + 1f; z += stepZ)
+                candidates.Add(VisualConsts.ProjectElevationPointToGround(new Vector3(x, b.center.y, z), zone.GroundPlaneY));
+            Log?.LogInfo($"[Build] Area '{areaId}' {2f * b.extents.x:0.00} x {2f * b.extents.z:0.00} m at ({b.center.x:0.00}, {b.center.z:0.00}), tried every {stepX:0.00} x {stepZ:0.00} m.");
         }
 
-        Log?.LogInfo($"[Build] {areas.Count} marked area(s) '{areaId}' in the zone ({byOverlap} by overlap, {inactive} switched off).");
+        Log?.LogInfo($"[Build] {areas.Count} marked area(s) '{areaId}' in the zone ({byOverlap} by overlap, {inactive} switched off), pass {pass}: {candidates.Count} point(s) to try.");
     }
 
     /// <summary>
@@ -810,6 +1213,14 @@ internal static class BuildingReader
 
         var candidates = new List<Vector3>();
         var def = CurrentBuild(_controller)?.Definition;
+        AreaCorners.Clear();
+
+        _spotsExact = false;
+        _coverHint = null;
+        _inTheWay = new List<string>();
+        if (def != null && def.chooseCustomBuildAreaType == BuildingDef.BuildAreaChoosingType.FullCoverSoft
+            && !string.IsNullOrEmpty(def.customBuildAreaId) && zone != null && zone.ZoneCollider != null)
+            return FullCoverSpots(def.customBuildAreaId, zone, start, playerPos);
 
         // An add-on is only any use against its workbench: search around each one instead of
         // around the player, and keep only spots the game would connect.
@@ -865,9 +1276,108 @@ internal static class BuildingReader
             return linked;
         }
 
-        if (def != null && !string.IsNullOrEmpty(def.customBuildAreaId) && zone != null && zone.ZoneCollider != null)
-            AddMarkedAreas(def.customBuildAreaId, zone, candidates);
+        var joining = JoiningSpots(start, playerPos);
 
+        var marked = def != null && !string.IsNullOrEmpty(def.customBuildAreaId) && zone != null && zone.ZoneCollider != null;
+        var reserved = ReservedBands();
+        var placingParent = TakesAddOns(CurrentBuild(_controller));
+        if (placingParent && Pointer(_controller)?.PointerObject is WgoBuildPointer slotPointer)
+        {
+            var slots = AddOnSlots(PointerTarget(slotPointer));
+            Log?.LogInfo($"[Build] '{CurrentBuild(_controller)?.WgoId}' has {slots.Count} add-on slot(s){(slots.Count == 0 ? "; keeping a strip beside it instead" : ": " + string.Join(", ", slots.Select(a => a.Id)))}.");
+        }
+        var fallback = new List<Vector3>();
+        // A Soft area holding several buildings (the barracks barricades) must be packed from a
+        // corner. The centre alone passes on an empty area, and a first barricade built there left
+        // no room for any other (log of 2026-10-04): on a few such areas, go on to the fine grid.
+        var packTight = marked && def.chooseCustomBuildAreaType == BuildingDef.BuildAreaChoosingType.Soft;
+        for (var pass = 0; ; pass++)
+        {
+            candidates.Clear();
+            if (marked) AddMarkedAreas(def.customBuildAreaId, zone, candidates, pass);
+            var noAreas = candidates.Count == 0;
+            CheckSpots(candidates, start, playerPos, zone, def, reserved, placingParent, result, fallback);
+            if (noAreas || pass + 1 >= AreaPasses) break;
+            // Only spots that fail the add-on rules so far: look finer before settling for them (a
+            // furnace on the yard found one spot at the area centres, its bellows slot blocked).
+            if (result.Count > 0)
+            {
+                if (!packTight || AreaCorners.Count > 16) break;
+                pass = AreaPasses - 2;
+            }
+        }
+
+        Log?.LogInfo($"[Build] {reserved.Count} workbench(es) keeping room for an add-on; placing one that takes add-ons: {placingParent}; {fallback.Count} spot(s) set aside.");
+        MoveTo(start);
+
+        // Nothing found on a marked area: the free room may only fit the building turned.
+        if (result.Count == 0 && fallback.Count == 0 && def != null && !string.IsNullOrEmpty(def.customBuildAreaId))
+            _coverHint = Loc.Get("build.cover_turn");
+
+        if (result.Count == 0 && fallback.Count > 0 && joining.Count == 0)
+        {
+            _spotsCompromised = true;
+            return fallback;
+        }
+        _spotsCompromised = false;
+
+        // On a marked area, a building in a corner leaves the most room for the next one: in the
+        // barracks a first barricade in the middle would leave no room for the other two.
+        if (AreaCorners.Count > 0)
+            result = result.OrderBy(r => AreaCorners.Min(c => Flat(c - r).sqrMagnitude)).Take(8).ToList();
+
+        // Spots against an add-on already standing come first; they need no room kept for one.
+        if (joining.Count > 0)
+            result = joining.Concat(result.Where(r => !joining.Exists(j => Flat(j - r).sqrMagnitude < 1f))).ToList();
+        return result;
+    }
+
+    /// <summary>
+    /// Green spots where the workbench being placed would connect to an add-on already standing
+    /// (see <see cref="AddOnsToJoin"/>), at most three per add-on, or none when it takes no add-ons.
+    /// </summary>
+    private static List<Vector3> JoiningSpots(Vector3 start, Vector3 playerPos)
+    {
+        var found = new List<Vector3>();
+        var addOns = AddOnsToJoin(AllowedAddOns(CurrentBuild(_controller)), playerPos);
+        if (addOns.Count == 0) return found;
+
+        var grid = GridStep(_controller);
+        var sx = Mathf.Max(0.1f, 0.04f * grid.x);
+        var sz = Mathf.Max(0.1f, 0.05f * grid.y);
+        var rings = Mathf.Min(40, Mathf.CeilToInt(4f / Mathf.Min(sx, sz)));
+        var tried = 0;
+        foreach (var addOn in addOns)
+        {
+            var origin = new Vector3(addOn.Data.Position.x, start.y, addOn.Data.Position.z);
+            var mine = 0;
+            for (var r = 1; r <= rings && mine < 3 && tried < 2500; r++)
+            for (var i = -r; i <= r && mine < 3; i++)
+            for (var j = -r; j <= r && mine < 3; j++)
+            {
+                if (Mathf.Abs(i) != r && Mathf.Abs(j) != r) continue;
+                if (++tried > 2500) break;
+                if (!MoveTo(origin + new Vector3(i * sx, 0f, j * sz))) continue;
+                if (!ConnectedAddOns().Contains(addOn)) continue;
+                var at = CursorGround();
+                if (found.Exists(s => Flat(s - at).sqrMagnitude < 1f)) continue;
+                found.Add(at);
+                mine++;
+            }
+        }
+        MoveTo(start);
+        Log?.LogInfo($"[Build] {addOns.Count} add-on(s) to join ({string.Join(", ", addOns.Select(a => a.Data.id))}): {found.Count} spot(s) against them, {tried} tried.");
+        return found;
+    }
+
+    /// <summary>
+    /// Puts the pointer on each candidate, nearest the player first, and adds the green ones to
+    /// <paramref name="result"/>, or to <paramref name="fallback"/> when they fail only the add-on
+    /// room tests. With no candidates, searches rings around the player.
+    /// </summary>
+    private static void CheckSpots(List<Vector3> candidates, Vector3 start, Vector3 playerPos, WorldZone zone, BuildingDef def,
+        List<(Wgo Owner, Bounds Band)> reserved, bool placingParent, List<Vector3> result, List<Vector3> fallback)
+    {
         if (candidates.Count == 0)
         {
             // A spiral of grid-sized steps, two cells apart, out to about twelve metres.
@@ -893,20 +1403,19 @@ internal static class BuildingReader
         // its first add-on is not offered, and a workbench that takes add-ons is offered first
         // where one would still fit beside it. Spots that fail only these tests are kept as a
         // fallback rather than leaving the player with nothing.
-        var reserved = ReservedBands();
-        var placingParent = TakesAddOns(CurrentBuild(_controller));
-        var fallback = new List<Vector3>();
-
+        var minGap = def != null && !string.IsNullOrEmpty(def.customBuildAreaId) ? 0.05f : 1f;
         const int maxChecks = 2500;
-        const int wanted = 8;
+        var wanted = AreaCorners.Count > 0 ? 200 : 8;
         var checks = 0;
         foreach (var c in candidates)
         {
             if (++checks > maxChecks || result.Count >= wanted) break;
             if (!MoveTo(c)) continue;
 
+            // Spots closer than a metre are one spot - except on a marked area, where two
+            // barricade places are 0.9 m apart and each one counts.
             var at = CursorGround();
-            if (result.Exists(s => Flat(s - at).sqrMagnitude < 1f)) continue;
+            if (result.Exists(s => Flat(s - at).sqrMagnitude < minGap * minGap)) continue;
 
             if (ReservedBy(reserved) != null || (placingParent && !HasRoomForAddOn()))
             {
@@ -915,16 +1424,73 @@ internal static class BuildingReader
             }
             result.Add(at);
         }
+    }
 
-        Log?.LogInfo($"[Build] {reserved.Count} workbench(es) keeping room for an add-on; placing one that takes add-ons: {placingParent}; {fallback.Count} spot(s) set aside.");
-        MoveTo(start);
-        if (result.Count == 0 && fallback.Count > 0)
+    // ---- areas the building must cover ------------------------------------------------------
+
+    /// <summary>Said instead of "no free spot" when the free areas need the building turned.</summary>
+    private static string _coverHint;
+
+    /// <summary>
+    /// Spots for a building whose area type is <c>FullCoverSoft</c> (the barracks barricades):
+    /// the building's footprint must contain the whole marked area
+    /// (<c>WgoBuildPointer.TryGetCoveredFullCoverSoftBuildArea</c>) and nothing may stand on the
+    /// area. A grid search near it can never pass - the footprint is barely larger than the area -
+    /// so the third barricade found nothing at any rotation (user, 2026-10-03). The game's own
+    /// green ghost goes on the area's centre, turned to the area's <c>RotationRequirement</c>; this
+    /// does the same: put the pointer down, measure where its footprint lands, shift it onto the
+    /// centre, and keep the exact position.
+    /// </summary>
+    private static List<Vector3> FullCoverSpots(string areaId, WorldZone zone, Vector3 start, Vector3 playerPos)
+    {
+        var found = new List<(Vector3 Position, float Distance)>();
+        var wrongTurn = 0;
+        var pointer = Pointer(_controller);
+        var rotation = pointer?.PointerObject is WgoBuildPointer wgoPointer && wgoPointer.Target != null
+            ? wgoPointer.Target.MainWgoPart.WgoPartData.rotationIndex : -1;
+
+        var bounds = zone.ZoneCollider.bounds;
+        foreach (var area in UnityEngine.Object.FindObjectsByType<BuildArea>(FindObjectsSortMode.None))
         {
-            _spotsCompromised = true;
-            return fallback;
+            if (area == null || area.Id != areaId || !area.isActiveAndEnabled) continue;
+            var col = area.Collider != null ? area.Collider : area.GetComponent<Collider>();
+            if (col == null || !col.enabled) continue;
+            var b = col.bounds;
+            if (!bounds.Contains(new Vector3(b.center.x, bounds.center.y, b.center.z))) continue;
+
+            MoveTo(VisualConsts.ProjectElevationPointToGround(b.center, zone.GroundPlaneY));
+            var footprint = pointer?.PointerObject is BuildPointerObject obj ? obj.GetWorldRoundedBounds() : default;
+            var exact = LastSnapped(_controller) + new Vector3(b.center.x - footprint.center.x, 0f, b.center.z - footprint.center.z);
+            var free = MoveExact(exact);
+            var after = pointer?.PointerObject is BuildPointerObject obj2 ? obj2.GetWorldRoundedBounds() : default;
+
+            var needsTurn = area.HasRotationRequirement && rotation != -1 && area.RotationRequirement != rotation;
+            Log?.LogInfo($"[Build] Cover area at ({b.center.x:0.00}, {b.center.z:0.00}) size {b.size.x:0.00} x {b.size.z:0.00}; " +
+                         $"building {after.size.x:0.00} x {after.size.z:0.00} at ({after.center.x:0.00}, {after.center.z:0.00}); " +
+                         $"rotation {rotation}, area wants {(area.HasRotationRequirement ? area.RotationRequirement.ToString() : "any")}; free: {free}.");
+
+            if (!free)
+            {
+                // Say why, per slot: "Schmelzofen II: Holzvorrat" (user, 2026-10-04).
+                var reasons = CannotPayText() is string unpaid ? new List<string> { unpaid } : SlotBlockers(out _);
+                var owner = area.GetComponentInParent<Wgo>();
+                var host = owner != null && owner.Data != null ? ObjectNames.Of(owner.Data.id) : null;
+                Log?.LogInfo($"[Build] Slot of '{owner?.Data?.id}' at ({b.center.x:0.00}, {b.center.z:0.00}) not free: {(reasons.Count == 0 ? "no reason found" : string.Join(", ", reasons))}.");
+                if (reasons.Count > 0)
+                {
+                    var why = string.Join(", ", reasons);
+                    _inTheWay.Add(host == null ? why : Loc.Fmt("build.slot_blocked", host, why));
+                }
+            }
+
+            if (free) found.Add((exact, Flat(exact - playerPos).magnitude));
+            else if (needsTurn || after.size.x + 0.01f < b.size.x || after.size.z + 0.01f < b.size.z) wrongTurn++;
         }
-        _spotsCompromised = false;
-        return result;
+
+        MoveTo(start);
+        _spotsExact = true;
+        if (found.Count == 0 && wrongTurn > 0) _coverHint = Loc.Get("build.cover_turn");
+        return found.OrderBy(f => f.Distance).Select(f => f.Position).ToList();
     }
 
     // ---- keeping room for add-ons -----------------------------------------------------------
@@ -1000,6 +1566,21 @@ internal static class BuildingReader
                 var attached = wgo.Data.AttachedWorkbenchExtensions;
                 if (attached != null && attached.Count > 0) continue;
 
+                // A workbench with a slot for its add-on keeps that slot, nothing more.
+                var slots = AddOnSlots(wgo);
+                if (slots.Count > 0)
+                {
+                    foreach (var slot in slots)
+                    {
+                        var col = slot.Collider != null ? slot.Collider : slot.GetComponent<Collider>();
+                        if (col == null) continue;
+                        var area = col.bounds;
+                        area.Expand(new Vector3(0f, 1000f, 0f));
+                        result.Add((wgo, area));
+                    }
+                    continue;
+                }
+
                 var footprint = Footprint(wgo.GetComponentsInChildren<Collider>());
                 if (footprint == null) continue;
                 var band = footprint.Value;
@@ -1032,9 +1613,14 @@ internal static class BuildingReader
     /// <summary>
     /// True when a strip as wide as <see cref="AddOnBand"/> is clear along at least one side of the
     /// building under the pointer - no other building's footprint in it, and inside the build zone.
+    /// For a workbench with an add-on slot, true when a slot is free.
     /// </summary>
     private static bool HasRoomForAddOn()
     {
+        // A workbench with a slot for its add-on (furnace and bellows): only that slot counts.
+        var slotBlockers = PlacingSlotBlockers();
+        if (slotBlockers != null) return slotBlockers.Count == 0;
+
         var footprint = PointerFootprint();
         if (footprint == null) return true;
         var fp = footprint.Value;
@@ -1084,7 +1670,14 @@ internal static class BuildingReader
             var owner = ReservedBy(ReservedBands());
             if (owner != null) return Loc.Fmt("build.reserved", ObjectNames.Of(owner.Data.id));
             if (TakesAddOns(CurrentBuild(_controller)))
+            {
+                var slotBlockers = PlacingSlotBlockers();
+                if (slotBlockers != null)
+                    return slotBlockers.Count == 0
+                        ? Loc.Get("build.addon_slot_free")
+                        : Loc.Fmt("build.addon_slot_blocked", string.Join(", ", slotBlockers));
                 return Loc.Get(HasRoomForAddOn() ? "build.addon_room" : "build.addon_no_room");
+            }
         }
         catch (Exception ex)
         {
@@ -1099,7 +1692,7 @@ internal static class BuildingReader
     {
         if (!CanBuildHere())
         {
-            ScreenReader.Say(Loc.Get("build.blocked_here"));
+            ScreenReader.Say(CannotPayText() ?? Loc.Get("build.blocked_here"));
             return;
         }
 

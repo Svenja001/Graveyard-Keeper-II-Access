@@ -56,6 +56,7 @@ internal static class Reachability
             Areas.Add(node.Area);
 
             var links = BridgeCrossing.Links(graph, player, range);
+            links.AddRange(LadderLinks(graph, player, range));
             for (var changed = true; changed;)
             {
                 changed = false;
@@ -86,17 +87,19 @@ internal static class Reachability
 
         try
         {
-            foreach (var offset in Probes)
-            {
-                var probe = position + offset;
-                var nearest = _graph.GetNearest(probe);
-                if (nearest.node == null || !nearest.node.Walkable) continue;
-                if (Flat(nearest.position - position) > MaxReach) continue;
+            // The other level of a room with a ladder is on a graph of its own.
+            foreach (var graph in new[] { _graph }.Concat(InteriorNavmesh.Graphs.Where(g => g != _graph)))
+                foreach (var offset in Probes)
+                {
+                    var probe = position + offset;
+                    var nearest = graph.GetNearest(probe);
+                    if (nearest.node == null || !nearest.node.Walkable) continue;
+                    if (Flat(nearest.position - position) > MaxReach) continue;
 
-                // Floor at the top of a cliff is close on the map to a rock at its foot.
-                if (Mathf.Abs(nearest.position.y - position.y) > MaxClimb) continue;
-                if (Areas.Contains(nearest.node.Area)) return true;
-            }
+                    // Floor at the top of a cliff is close on the map to a rock at its foot.
+                    if (Mathf.Abs(nearest.position.y - position.y) > MaxClimb) continue;
+                    if (Areas.Contains(nearest.node.Area)) return true;
+                }
         }
         catch
         {
@@ -199,7 +202,8 @@ internal static class Reachability
         {
             if (IsUnder(scene, at)) return scene;
 
-            if (_floorGraph != null && Time.unscaledTime - _floorGraphTime < 2f && Flat(_floorGraphAt - at) < 2f)
+            // Not after a climb: a ladder moves the player two metres up and hardly sideways.
+            if (_floorGraph != null && Time.unscaledTime - _floorGraphTime < 2f && Vector3.Distance(_floorGraphAt, at) < 2f)
                 return _floorGraph;
 
             // A room the game gave no navmesh at all (the town guard barracks): build one first,
@@ -212,6 +216,11 @@ internal static class Reachability
             {
                 var nearest = graph.GetNearest(at);
                 if (nearest.node == null || !nearest.node.Walkable) continue;
+
+                // Floor a storey below is not under the player. Reported (2026-10-04): on the
+                // warehouse platform the ground floor's graph, 2.4 m down, was taken as the
+                // player's; a walk planned on it carried them off the edge and out of the world.
+                if (Mathf.Abs(nearest.position.y - at.y) > MaxStandGap) continue;
                 var d = Flat(nearest.position - at) + Mathf.Abs(nearest.position.y - at.y);
                 if (d < bestDistance) { bestDistance = d; best = graph; }
             }
@@ -234,7 +243,49 @@ internal static class Reachability
     {
         if (graph == null) return false;
         var nearest = graph.GetNearest(at);
-        return nearest.node != null && Flat(nearest.position - at) < 1.5f && Mathf.Abs(nearest.position.y - at.y) < 2f;
+        return nearest.node != null && Flat(nearest.position - at) < 1.5f && Mathf.Abs(nearest.position.y - at.y) < MaxStandGap;
+    }
+
+    /// <summary>More height than this between the player and the floor on the map: not standing on it.</summary>
+    internal const float MaxStandGap = 1.2f;
+
+    /// <summary>
+    /// Ladders join areas the navmesh does not: each end's floor, on whichever graph it lies -
+    /// a room's platform has a graph of its own (<see cref="InteriorNavmesh"/>).
+    /// </summary>
+    private static List<(uint, uint)> LadderLinks(Pathfinding.RecastGraph graph, PlayerController player, float range)
+    {
+        var links = new List<(uint, uint)>();
+        var graphs = new[] { graph }.Concat(InteriorNavmesh.Graphs.Where(g => g != graph)).ToList();
+        foreach (var wgo in Navigator.SpawnedWgos)
+        {
+            if (wgo == null || wgo.Data == null || wgo.Data.Definition == null) continue;
+            if (wgo.Data.Definition.interactionType != WGODef.InteractionType.Ladder) continue;
+            if (Flat(wgo.Data.Position - player.MovablePosition) > range) continue;
+
+            var ladder = wgo.GetComponentInChildren<Ladder>();
+            if (ladder == null || ladder.BotPart == null || ladder.TopPart == null) continue;
+            var bot = AreaAt(graphs, ladder.BotPart);
+            var top = AreaAt(graphs, ladder.TopPart);
+            if (bot.HasValue && top.HasValue && bot.Value != top.Value) links.Add((bot.Value, top.Value));
+        }
+        return links;
+    }
+
+    private static uint? AreaAt(List<Pathfinding.RecastGraph> graphs, LadderEdgePart part)
+    {
+        foreach (var point in new[] { part.TpPoint, part.StartPoint })
+        {
+            if (point == null) continue;
+            var at = point.position;
+            foreach (var graph in graphs)
+            {
+                var nearest = graph.GetNearest(at);
+                if (nearest.node == null || !nearest.node.Walkable) continue;
+                if (Flat(nearest.position - at) < 1.5f && Mathf.Abs(nearest.position.y - at.y) < 1f) return nearest.node.Area;
+            }
+        }
+        return null;
     }
 
     private static bool HasFloorNear(Pathfinding.NavGraph graph, Vector3 position)

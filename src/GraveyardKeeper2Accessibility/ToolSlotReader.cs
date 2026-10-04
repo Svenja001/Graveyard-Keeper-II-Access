@@ -22,6 +22,9 @@ internal static class ToolSlotReader
 
         try
         {
+            var zombie = cell.GetComponentInParent<ZombieEquipmentInventoryWidget>();
+            if (zombie != null) return DescribeZombieCell(zombie, cell);
+
             if (cell.GetComponentInParent<ToolBeltInventoryWidget>() == null) return null;
             var fixedCell = cell.GetComponentInParent<UIFixedTypeItemCell>();
             if (fixedCell == null || fixedCell.ItemType == ItemType.None) return null;
@@ -53,6 +56,34 @@ internal static class ToolSlotReader
             Plugin.Log?.LogWarning($"[ToolSlot] Could not describe cell '{cell.name}': {ex.Message}");
             return null;
         }
+    }
+
+    private static readonly AccessTools.FieldRef<ZombieEquipmentInventoryWidget, UIFixedTypeItemCell> ZombieCollar =
+        AccessTools.FieldRefAccess<ZombieEquipmentInventoryWidget, UIFixedTypeItemCell>("collarCell");
+    private static readonly AccessTools.FieldRef<ZombieEquipmentInventoryWidget, UIFixedTypeItemCell> ZombieArmor =
+        AccessTools.FieldRefAccess<ZombieEquipmentInventoryWidget, UIFixedTypeItemCell>("armorCell");
+    private static readonly AccessTools.FieldRef<ZombieEquipmentInventoryWidget, UIGroupsItemCell> ZombieTool =
+        AccessTools.FieldRefAccess<ZombieEquipmentInventoryWidget, UIGroupsItemCell>("toolCell");
+    private static readonly AccessTools.FieldRef<ZombieEquipmentInventoryWidget, UIGroupsItemCell> ZombieWeapon =
+        AccessTools.FieldRefAccess<ZombieEquipmentInventoryWidget, UIGroupsItemCell>("weaponCell");
+
+    /// <summary>
+    /// A slot in the zombie window (collar, armour, tool, weapon). On screen an empty one is only a
+    /// silhouette, so all four read "empty slot" alike; this says which slot it is.
+    /// </summary>
+    private static string DescribeZombieCell(ZombieEquipmentInventoryWidget widget, UIItemCell cell)
+    {
+        string key = null;
+        if (ZombieCollar(widget)?.UIItemCell == cell) key = "zombieslot.collar";
+        else if (ZombieArmor(widget)?.UIItemCell == cell) key = "zombieslot.armor";
+        else if (ZombieTool(widget)?.UIItemCell == cell) key = "zombieslot.tool";
+        else if (ZombieWeapon(widget)?.UIItemCell == cell) key = "zombieslot.weapon";
+        if (key == null) return null;
+
+        var slot = Loc.Get(key);
+        var shown = cell.DisplayingItem;
+        var empty = shown == null || shown.IsEmpty || string.IsNullOrEmpty(shown.id) || shown.id == "empty";
+        return empty ? Loc.Fmt("toolslot.empty", slot) : Loc.Fmt("toolslot.holds", slot, ItemText.Name(shown.id));
     }
 
     /// <summary>"Bauen +2" - the mastery the tool adds, or null when it adds none.</summary>
