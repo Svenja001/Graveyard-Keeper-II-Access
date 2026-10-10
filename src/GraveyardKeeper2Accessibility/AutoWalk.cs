@@ -304,6 +304,7 @@ internal static class AutoWalk
 
         ResetLegs();
         ResetInteraction();
+        FocusLock.Release("a new walk");
         _bridgesCrossed = 0;
         _laddersClimbed = 0;
         _interactTarget = target;
@@ -737,6 +738,8 @@ internal static class AutoWalk
         if (wgo == _interactWith)
         {
             _log?.LogInfo($"[Walk] Arrived at '{_interactWith.id}'; the game targets it.");
+            // Held as well, so the facing settling a frame later cannot lose it again.
+            FocusLock.Hold(_interactWith);
             ReportArrival(picked);
             return;
         }
@@ -744,6 +747,14 @@ internal static class AutoWalk
         _log?.LogInfo(
             $"[Walk] Arrived for '{_interactWith.id}' at {player.MovablePosition} facing {player.MovableDirection}, " +
             $"but the game targets '{picked ?? "nothing"}'.");
+
+        // Close enough: make it the target, as GK1's mod did, rather than walking on to another
+        // spot or saying "nothing in front of you". See FocusLock.
+        if (FocusLock.Hold(_interactWith))
+        {
+            ReportArrival(picked);
+            return;
+        }
 
         // Planned from far away the thing may not have existed yet; it does now.
         if ((_spots == null || _spots.Count == 0) && !_replanned)
@@ -1193,6 +1204,7 @@ internal static class AutoWalk
         _pending = default;
         ResetLegs();
         ResetInteraction();
+        FocusLock.Release("the walk was stopped");
 
         try
         {

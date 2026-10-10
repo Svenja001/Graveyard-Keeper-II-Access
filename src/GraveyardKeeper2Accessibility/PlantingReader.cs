@@ -124,7 +124,14 @@ internal static class PlantingReader
             var left = Math.Max(0, ItemText.Held(__state.ItemId));
             if (__result)
             {
-                Say(Loc.Fmt(__state.Fertilizer ? "planting.fertilized" : "planting.planted", name, left));
+                var line = Loc.Fmt(__state.Fertilizer ? "planting.fertilized" : "planting.planted", name, left);
+                // Planting: say whether the bed was fertilized first (user, 2026-10-10).
+                if (!__state.Fertilizer)
+                {
+                    var fertilizer = CraftReader.FertilizerLine(AssignedWgo(__instance)?.Data, sayNone: true);
+                    if (fertilizer != null) line = $"{line}. {fertilizer}";
+                }
+                Say(line);
                 return;
             }
             Say(WhyNot(__instance, interactor, __state.ItemId, name));

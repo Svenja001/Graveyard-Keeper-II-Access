@@ -27,12 +27,16 @@ are built in but not yet tested — see *Known limitations* in the README.
   list before you choose, and an answer you cannot pick says why and what it would cost.
 - **Cutscene text and story cards are read.** A cutscene that can be skipped says so: hold Escape
   for three seconds.
-- **J says what each quest is actually waiting for** — "go to …", "use …", "destroy …" — and what is
-  still missing first, such as armour not equipped.
+- **J opens the list of quests in progress**, one quest per line: Up and Down go through it, J
+  closes it. Quests waiting to be begun follow, saying how to begin them ("To start: talk to …").
+  Finished quests and the game's hidden bookkeeping quests are left out. Each quest says what it is
+  actually waiting for — "go to …", "use …", "destroy …" — and what is still missing first, such as
+  armour not equipped.
 - **Story steps the game missed are repaired.** When you stand where the story waits for you but
   the game did not notice (a trigger crossed in the wrong order, or crossed while walking), the mod
   fires the game's own event for it, so the intro cannot be soft-locked that way.
-- **Level-ups, finished inspirations, new perks and achievements are announced.**
+- **Level-ups, finished inspirations, new perks and achievements are announced.** An achievement
+  earned in a scene is said once the scene is over, so the scene's own lines do not drown it.
 
 ### Finding your way
 
@@ -41,6 +45,12 @@ are built in but not yet tested — see *Known limitations* in the README.
   The list leaves out what you cannot use or reach yet.
 - **"Next story steps"** comes first in the list, and End jumps straight to it: whatever the story
   is waiting for you to use, even when no quest text says so.
+- **"Something new"** follows right after it, as in the first game: everyone and everything the
+  game shows a bubble over — a person who wants to talk, a reward to collect, something to look at
+  or pick up, a prayer stand waiting, fish biting — each saying which, plus furnaces and other
+  stations with finished goods waiting to be taken.
+- **Beehives** have their own list, wild and built, with the spot to build one, and say whether a
+  hive is empty or refilling. They stay listed while refilling, when the game will not let you use them.
 - **Story triggers** — the invisible spots that move the story on when walked into — are listed too.
 - **Every object says its state**: what a furnace is making and how far along, how far a crop has
   grown, what tool or mastery you still need to work a stone.
@@ -50,9 +60,9 @@ are built in but not yet tested — see *Known limitations* in the README.
   crosses a spot where a story scene may take over.
 - **Auto-walk:** Ctrl+Home walks you to the selected object, F5 to the current objective (F3 says
   where it is). The game walks the player itself along its own route, round fences and buildings,
-  across bridges and through doors. It stops at the spot where E actually picks the thing you walked
-  to, and tells you if something else is in front of you instead. It will not start while a story
-  scene is moving you.
+  across bridges and through doors. When you arrive, the thing you walked to is focused, as in the
+  first game, so E uses it even if it is not quite in front of you. The focus stays until you move
+  or turn. It will not start while a story scene is moving you.
 - **Rooms the game gives no walking map, such as the guard barracks,** work too: the mod maps the
   room's floor itself when you walk in, so the object list, routes and auto-walk work inside.
 - **Fast travel:** pressing E at a travel stone opens the map, which now says where you are and
@@ -87,8 +97,10 @@ are built in but not yet tested — see *Known limitations* in the README.
 - **The item menu** (use, put on the hotbar, destroy) opens with **Shift+F10** or the Applications
   key on an inventory item, without using the item. Destroying an item says what was destroyed.
 - **Planting with a seed in hand speaks:** "Pflanzen" on a seed (or its hotbar key) says what you are
-  holding; E on each empty bed then plants it without the bed window and says how many are left, or
-  why the bed refuses.
+  holding; E on each empty bed then plants it without the bed window and says how many are left,
+  whether the bed was fertilized, or why the bed refuses.
+- **Fertilizer is read:** garden beds say which fertilizer is on them, in the object list and in the
+  bed window, and the bed window's fertilizer slots say what is in them instead of "empty".
 - **Gains and losses** of energy, money, tech points and happiness are said once per action.
 - **Pickups, a full bag, equipping and unequipping** are announced. Items say their quality as
   bronze, silver or gold.
@@ -113,6 +125,12 @@ are built in but not yet tested — see *Known limitations* in the README.
   left standing alone, so a replaced anvil joins the old one's bucket. When the materials have run out or the building's limit
   is reached, it says so and names what is missing, instead of saying there is no room.
 - **Remove mode** works: pick a building, Enter marks it for demolition.
+- **The cellar factory** (new, not yet tried in play): G says whether the factory runs or stands
+  still for lack of power, the zombie carousels, and each workbench's zombie, work, missing
+  materials and unconnected sides. Shift+G and Ctrl+G read the conveyor lines one by one — where
+  they start, which way the belts run and where they lead, with dead ends called out. Placing a
+  belt or other factory piece says which way it runs and what it would join before you build it,
+  and what it joined after.
 - **Tech tree and inspirations** are read and can be bought from the keyboard. C jumps to the
   next thing you can buy right now, in any talent; on the tech tree, the next technology your points can learn
   in any open branch.

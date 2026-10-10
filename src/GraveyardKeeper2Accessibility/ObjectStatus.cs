@@ -64,6 +64,20 @@ internal static class ObjectStatus
 
         try
         {
+            // A fertilized bed looks different on screen; in the list it says so.
+            if (data.Definition.interactionType == WGODef.InteractionType.Garden)
+            {
+                var fertilizers = CraftReader.FertilizerNames(data);
+                if (fertilizers.Count > 0) parts.Add(Loc.Fmt("status.fertilized", string.Join(", ", fertilizers)));
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Status] Could not read the fertilizer of '{data.id}': {ex.Message}");
+        }
+
+        try
+        {
             var stock = Stock(data);
             if (stock != null) parts.Add(stock);
         }

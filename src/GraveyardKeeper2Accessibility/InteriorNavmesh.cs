@@ -49,11 +49,31 @@ internal static class InteriorNavmesh
         try
         {
             var zone = player == null || MainGame.PlayerData == null ? null : MainGame.PlayerData.CurrentWorldZoneData;
-            if (zone == null || zone.navigationGraph != LazyConsts.Navigation.Graph.None) return null;
-            if (zone.wholeZoneRect.width <= 0f || zone.wholeZoneRect.height <= 0f) return null;
-            if (zone.wholeZoneRect.width > MaxSide || zone.wholeZoneRect.height > MaxSide) return null;
-
+            if (zone == null) return null;
             var id = zone.id ?? "";
+
+            // Reported (2026-10-06): in Jack's workshop Jack and everything else was "out of reach"
+            // and a walk away from him was refused as off the map, though the player walked it by
+            // hand - and the game's Player.log has no scan of any graph near the room. A zone can
+            // name a graph the game never scans there; only a declared graph with floor under the
+            // player counts as the room's own.
+            if (zone.navigationGraph != LazyConsts.Navigation.Graph.None)
+            {
+                var declared = AstarPath.active?.data?.graphs is { } all ? At(all, (int)zone.navigationGraph) : null;
+                if (HasFloorUnder(declared, player.MovablePosition)) return null;
+                Skipped(id, $"declares graph {zone.navigationGraph}, which has no floor under the player; scanning it anyway");
+            }
+            if (zone.wholeZoneRect.width <= 0f || zone.wholeZoneRect.height <= 0f)
+            {
+                Skipped(id, "has no rectangle");
+                return null;
+            }
+            if (zone.wholeZoneRect.width > MaxSide || zone.wholeZoneRect.height > MaxSide)
+            {
+                Skipped(id, $"is {zone.wholeZoneRect.size}, too big to be a room");
+                return null;
+            }
+
             if (_builtFor == id && _graph != null && Covers(_graph, zone))
             {
                 EnsureUpper(zone);
@@ -61,12 +81,16 @@ internal static class InteriorNavmesh
             }
             if (FailedAt.TryGetValue(id, out var at) && Time.unscaledTime - at < 30f) return null;
 
-            // Covered by the scene's navmesh after all: an outdoor zone, nothing to build.
+            // Covered by the scene's navmesh after all: nothing to build. Asked at the player, not at
+            // the zone's centre. Reported (2026-10-06, second try): in Jack's workshop
+            // (workshop_conveyor) the scene had a patch of floor 3.4 m from the centre, so the room
+            // counted as covered - while the player, at the door and beside Jack, stood on none of
+            // it. Jack, the exit and everything else stayed "out of reach".
             var scene = player.SceneRecastGraph;
-            if (scene != null && scene.CountNodes() > 0)
+            if (HasFloorUnder(scene, player.MovablePosition))
             {
-                var nearest = scene.GetNearest(zone.Center);
-                if (nearest.node != null && Flat(nearest.position - zone.Center) < 15f) return null;
+                Skipped(id, "is covered by the scene's navmesh where the player stands");
+                return null;
             }
 
             var graph = Build(zone);
@@ -87,6 +111,23 @@ internal static class InteriorNavmesh
             Plugin.Log?.LogWarning($"[Nav] Could not give the room a navmesh: {ex.Message}");
             return null;
         }
+    }
+
+    private static readonly HashSet<string> LoggedSkips = new();
+
+    /// <summary>Why a room got no scan, once per room and reason - the silence hid the workshop.</summary>
+    private static void Skipped(string zone, string why)
+    {
+        if (LoggedSkips.Add(zone + "|" + why)) Plugin.Log?.LogInfo($"[Nav] Room '{zone}' {why}.");
+    }
+
+    /// <summary>Walkable floor of <paramref name="graph"/> within a step of <paramref name="at"/>.</summary>
+    private static bool HasFloorUnder(Pathfinding.RecastGraph graph, Vector3 at)
+    {
+        if (graph == null || graph.CountNodes() == 0) return false;
+        var nearest = graph.GetNearest(at);
+        return nearest.node != null && nearest.node.Walkable
+               && Flat(nearest.position - at) < 2.5f && Mathf.Abs(nearest.position.y - at.y) < 1.2f;
     }
 
     /// <summary>Still ours and still over this zone - the game might rescan the slot for a fight.</summary>

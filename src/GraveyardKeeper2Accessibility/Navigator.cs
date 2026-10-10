@@ -46,9 +46,9 @@ internal static class Navigator
     /// </summary>
     private static readonly string[] CategoryPriority =
     {
-        "story", "fight_points", "wgo.Flag", "wgo.FlagStand", "wgo.Barricade", "wgo.FightBuilder", "wgo.FighterContainer",
+        "story", "new", "fight_points", "wgo.Flag", "wgo.FlagStand", "wgo.Barricade", "wgo.FightBuilder", "wgo.FighterContainer",
         "people", "doors", "named", "desks", "wgo.Script", "wgo.CustomInteraction", "drops",
-        "plants", "trees", "rocks", "loot", "obstacles", "wgo.Grave", "graves_decorate", "wgo.Craft", "repairs", "wgo.Chest",
+        "plants", "beehives", "trees", "rocks", "loot", "obstacles", "wgo.Grave", "graves_decorate", "wgo.Craft", "repairs", "wgo.Chest",
         "wgo.Work", "ladders", "enemies", "zones",
     };
 
@@ -384,6 +384,13 @@ internal static class Navigator
             if (IsStoryStep(data) && !Parked(data))
                 AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, "story", data: data));
 
+            // And under "something new" when the game is showing a bubble over it.
+            var bubble = BubbleLabel(data);
+            if (bubble != null && !data.IsHidden && !Parked(data))
+                AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, "new", bubble, data));
+
+            if (AddHive(data)) continue;
+
             // Everything below is left out while it cannot be used or reached - only the story
             // list keeps it, since that is where the player finds out what to open next.
             if (!Available(data)) continue;
@@ -396,10 +403,17 @@ internal static class Navigator
             var type = data.Definition.interactionType;
             if (type == WGODef.InteractionType.None && !HasRealName(data.id) && !IsExtension(data.id)) continue;
 
+            // A factory has belt pieces by the hundred; Shift+G reads them as lines instead.
+            if (FactoryReader.IsBeltPiece(data)) continue;
+
             AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, CategoryOf(data.id, data.Definition), data: data));
+
+            if (bubble == null && ReadyToTake(data))
+                AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, "new", Loc.Fmt("new.ready", ItemText.Name(data.id)), data));
         }
 
         AddGroundDrops(from);
+        if (!fight) AddFarHives(from);
         AddStoryZones(from);
         AddCapturePoints(from);
         AddFarStorySteps();
@@ -543,6 +557,93 @@ internal static class Navigator
         AllTargets.Add(new NavTarget(id, data.Position, data.WorldId, "wgo." + WGODef.InteractionType.Grave, label, data));
         return true;
     }
+
+    /// <summary>
+    /// A beehive, wild or built, or the spot one can be built on - listed under beehives with its
+    /// state. False for anything else.
+    ///
+    /// <para>
+    /// <b>Reported (2026-10-06):</b> a hive near the player's home was in no list, as in GK1 they
+    /// want a list of their own. The ids (read out of <c>resources.assets</c>): <c>honey_home</c>,
+    /// <c>honey_home_empty</c>, <c>honey_home_respawn</c> while it refills, the build spot
+    /// <c>honey_home_empty_place</c>, and wild <c>honey_wild</c> / <c>honey_wild_empty</c> /
+    /// <c>honey_wild_respawn</c>. A refilling hive is not interactable and an unbuilt spot may not
+    /// be either, so <see cref="Available"/> would drop exactly the states the player needs to
+    /// hear; only switched-off and unreachable ones are left out here.
+    /// </para>
+    /// </summary>
+    private static bool AddHive(WgoData data)
+    {
+        var id = data.id;
+        if (string.IsNullOrEmpty(id)) return false;
+        if (!id.StartsWith("honey_home", StringComparison.OrdinalIgnoreCase)
+            && !id.StartsWith("honey_wild", StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (Parked(data)) return true;
+        var why = data.IsHidden ? "hidden" : !Reachability.CanReach(data.Position) ? "out of reach" : null;
+        if (why != null)
+        {
+            if (LoggedHidden.Add($"{id}@{Mathf.RoundToInt(data.Position.x)},{Mathf.RoundToInt(data.Position.z)}:{why}"))
+                _log?.LogInfo($"[Nav] Left out beehive '{id}' at {data.Position}: {why}.");
+            return true;
+        }
+
+        var wild = id.StartsWith("honey_wild", StringComparison.OrdinalIgnoreCase);
+        var name = ItemText.Name(id);
+        if (string.IsNullOrWhiteSpace(name) || name == id) name = Loc.Get(wild ? "hive.wild" : "hive.name");
+
+        string state = null;
+        if (id.IndexOf("_place", StringComparison.OrdinalIgnoreCase) >= 0) state = "hive.place";
+        else if (id.IndexOf("_respawn", StringComparison.OrdinalIgnoreCase) >= 0) state = "hive.refilling";
+        else if (id.IndexOf("_empty", StringComparison.OrdinalIgnoreCase) >= 0) state = "hive.empty";
+
+        var label = state == null ? name : Loc.Fmt(state, name);
+        AllTargets.Add(new NavTarget(id, data.Position, data.WorldId, "beehives", label, data));
+
+        if (LoggedHidden.Add($"{id}@{Mathf.RoundToInt(data.Position.x)},{Mathf.RoundToInt(data.Position.z)}:hive"))
+            _log?.LogInfo($"[Nav] Beehive '{id}' ({data.Definition.interactionType}, interactable {data.IsInteractable}) at {data.Position}.");
+        return true;
+    }
+
+    /// <summary>
+    /// Hives in the world's data that have no view yet - the same reason as
+    /// <see cref="AddFarStorySteps"/>: object views exist only near the camera. Reported
+    /// (2026-10-06): the hive at home was in no list while only wild ones near the player were.
+    /// </summary>
+    private static void AddFarHives(Vector3 from)
+    {
+        try
+        {
+            var world = MainGame.WorldData;
+            if (world == null || !world.HasCache) return;
+            var scenes = world.LoadedScenes;
+            var found = new List<string>();
+            foreach (var data in world.Cache.wgoDataByUidCache.Values)
+            {
+                if (data?.Definition == null || string.IsNullOrEmpty(data.id)) continue;
+                if (!data.id.StartsWith("honey_home", StringComparison.OrdinalIgnoreCase)) continue;
+                found.Add($"{data.id} {data.Position} in '{data.WorldId}'{(scenes != null && !scenes.Contains(data.WorldId) ? " (scene not loaded)" : "")}");
+                if (scenes != null && !scenes.Contains(data.WorldId)) continue;
+                if (Flat(data.Position - from).magnitude > NavRange) continue;
+                var probe = new NavTarget(data.id, data.Position, data.WorldId, "beehives", data: data);
+                if (AllTargets.Any(t => t.CategoryKey == "beehives" && t.SameAs(probe))) continue;
+                AddHive(data);
+            }
+
+            var summary = found.Count == 0 ? "none in the world data" : string.Join("; ", found);
+            if (summary != _loggedHomeHives)
+            {
+                _loggedHomeHives = summary;
+                _log?.LogInfo($"[Nav] Home beehives: {summary}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Nav] Could not look for beehives in the world data: {ex.Message}");
+        }
+    }
+
+    private static string _loggedHomeHives;
 
     private static bool GraveHasBody(WgoData data)
     {
@@ -824,6 +925,45 @@ internal static class Navigator
     }
 
     /// <summary>
+    /// "Larry, wants to talk", or null when the game shows no bubble over the object.
+    ///
+    /// <para>
+    /// <b>The "something new" list, as in GK1.</b> A sighted player sees a speech bubble over a
+    /// person with something to say, a coin bubble over a reward to collect and a magnifying glass
+    /// over a thing to look at or pick up. All of them are the object's first pending interaction
+    /// event: <c>InteractionEvent.CustomIcon</c> picks the bubble from the event's type, and
+    /// <c>HUD.HasWorkInteractionEvent</c> reads the same first event for the magnifying glass.
+    /// The same objects are also in the story list; this one is just the bubbles, with what each
+    /// one means, so "who wants me" is one list away.
+    /// </para>
+    /// </summary>
+    private static string BubbleLabel(WgoData data)
+    {
+        var first = data.PeekFirstAddedEvent();
+        if (first == null) return null;
+
+        var key = first.type switch
+        {
+            InteractionEvent.Type.Talk => "new.talk",
+            InteractionEvent.Type.Reward => "new.reward",
+            InteractionEvent.Type.Pray => "new.pray",
+            InteractionEvent.Type.Fishing => "new.fishing",
+            _ => "new.something",
+        };
+        return Loc.Fmt(key, ItemText.Name(data.id));
+    }
+
+    /// <summary>
+    /// An automatic station (furnace, kiln) holding finished goods: on screen, the "take all"
+    /// hint. Nothing else happens there until the player comes, so it is something to pick up.
+    /// </summary>
+    private static bool ReadyToTake(WgoData data)
+    {
+        try { return data.CraftComponent?.Status == CraftComponentStatus.ReadyToFinishAutoCraft; }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// A story event on the object, or an object the quest in progress is plainly about.
     ///
     /// <para>
@@ -1011,11 +1151,21 @@ internal static class Navigator
         Categories.Sort(CompareCategories);
         _log?.LogInfo($"[Nav] {AllTargets.Count} objects in {Categories.Count} categories ({string.Join(", ", Categories)}); {_hiddenCount} left out as unusable or out of reach.");
 
+        var news = string.Join(", ", AllTargets.Where(t => t.CategoryKey == "new")
+            .Select(t => $"{t.Id} [{string.Join("/", t.Data?.Events?.Select(e => e.str) ?? Enumerable.Empty<string>())}]"));
+        if (news != _loggedNew)
+        {
+            _loggedNew = news;
+            _log?.LogInfo($"[Nav] Something new: {(news.Length == 0 ? "nothing" : news)}");
+        }
+
         // Keep pointing at the same category across a rebuild, so walking around does not silently
         // move the selection to a different kind of thing.
         if (previous != null)
             _categoryIndex = Categories.IndexOf(previous);
     }
+
+    private static string _loggedNew;
 
     /// <summary>Priority categories first, in <see cref="CategoryPriority"/> order; the rest alphabetically.</summary>
     private static int CompareCategories(string a, string b)

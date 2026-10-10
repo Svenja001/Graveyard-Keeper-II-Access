@@ -118,7 +118,9 @@ the game's own event for it, exactly as walking in would have.
 - **Only the first squad fight has been played.** "Break Through to the Port" was won with the mod
   alone; later fights, with more squads and other battlefields, are not tested yet. Not done at
   all: aiming the bow.
-- **Nothing about factories is tested yet.** Expect gaps there.
+- **The cellar factory is built from the game's code but not yet tried in play.** G, Shift+G and
+  Ctrl+G read it, and placing belts says what they join, but expect gaps. How zombies are put on
+  the carousel has not been looked at separately.
 - **Auto-walk can still fail.** Sometimes it says there is no route where there is one —
   across some bridges and doors, or in rooms the game has no walking map for (the mod builds one
   itself for those, which is new and untested). Walking there by hand usually works, and auto-walk

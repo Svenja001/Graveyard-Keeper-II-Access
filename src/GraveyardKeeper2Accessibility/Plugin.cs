@@ -36,6 +36,7 @@ public class Plugin : BaseUnityPlugin
         ObjectStatus.Init(Log);
         QuestReader.Init(Log, Config);
         StatusKeys.Init(Log, Config);
+        FactoryReader.Init(Log, Config);
         ResourceAnnouncer.Init(Log, Config);
         StoryRepair.Init(Log, Config);
         ZoneEntry.Init(Log);
@@ -98,6 +99,9 @@ public class Plugin : BaseUnityPlugin
 
             harmony.PatchAll(typeof(WorldAnnouncer));
             Log.LogInfo("Patched world interaction and pickups.");
+
+            harmony.PatchAll(typeof(FocusLock));
+            Log.LogInfo("Patched the interaction target for holding focus after a walk.");
 
             harmony.PatchAll(typeof(StoryRepair));
             Log.LogInfo("Patched story repair.");
@@ -168,6 +172,8 @@ public class Plugin : BaseUnityPlugin
             Log.LogInfo("Patched destroying items from the item menu.");
             new Harmony(PluginInfo.Guid + ".planting").PatchAll(typeof(PlantingReader));
             Log.LogInfo("Patched planting with a seed in hand.");
+            new Harmony(PluginInfo.Guid + ".factory").PatchAll(typeof(FactoryReader));
+            Log.LogInfo("Patched building conveyor pieces.");
         }
         catch (Exception ex)
         {
@@ -237,6 +243,7 @@ public class Plugin : BaseUnityPlugin
         StationsReader.UpdateFishing();
         WorkSpotCheck.Update();
         UiNarrator.Update();
+        ProgressAnnouncer.Update();
 
         if (!_keysWork) return;
 
@@ -249,12 +256,16 @@ public class Plugin : BaseUnityPlugin
             if (BindingsReader.Update()) return;
 
             if (MilitaryReader.UpdateKeys()) return;
+
+            // The quest list (J) claims Up, Down and Enter while it is open; it closes on any window.
+            if (QuestReader.Update()) return;
+
             MenuKeys.Update();
             Navigator.Update();
             AutoWalk.Update();
             Rescue.Update();
-            QuestReader.Update();
             StatusKeys.Update();
+            FactoryReader.Update();
 
             if (_repeatKey.Value.IsDown() && !NotesReader.TryRepeat() && !BodyWindowsReader.TryRepeat() &&
                 !CraftReader.TryRepeat() && !StationsReader.TryRepeat() && !TreesReader.TryRepeat() &&

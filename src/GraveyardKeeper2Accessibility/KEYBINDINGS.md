@@ -13,7 +13,7 @@ Version 0.1.0. This file ships beside the mod so the keys can be found without a
 | **End** | **Jumps straight to "next story steps"** — what the story is waiting for you to use — and says the nearest. If nothing is waiting, says your current task. |
 | **Home** | Says the selected object again — its state, distance and direction — then how long the way there really is and which areas it passes through. |
 | **Ctrl+Home** | **Walks you to the selected object.** Press again to stop. |
-| **J** | Reads the quests you currently have, and for each one in progress what the game is actually waiting for: "Now: go to …", "use …", "destroy …" — plus anything still missing first, such as armour not equipped. |
+| **J** | **Opens the list of quests in progress**, one quest at a time. **Up** / **Down** go through it, **Enter** reads the current one again, **J** closes it (so does any game window opening). Each quest says what the game is actually waiting for: "Now: go to …", "use …", "destroy …" — plus anything still missing first, such as armour not equipped. After them come the quests waiting to be begun, each saying how: "To start: talk to …". Finished quests and the game's hidden bookkeeping quests are left out. |
 | **F4** | Fight status: whether a fight is running, your health, the health of what you are defending, and how many enemies are near with the closest one's direction. In a squad fight also: how many enemies are left in total, whether the base is safe or under attack, which lines are breached, how many of each squad are still alive, and which flag you are carrying. During a fight, your health and the defended object's health are also announced at 75, 50 and 25 percent. |
 | **Shift+F4** | Fight readiness, anywhere: your total defence power, the barricades and towers at the base, the mercenaries, and each zombie squad with how many zombies it has and how many are ready to fight. Also what the last fight you looked at asked for. |
 | **Ctrl+Enter** | In the pre-fight window (after choosing a fight at Herbert), and in the fight builder's window on the battlefield: **starts the fight.** The game only offers this on a controller. |
@@ -62,7 +62,8 @@ and Z, because R, P and Q are the game's own keys here (rotate, inspirations, qu
 | **K** | Money, in gold, silver and bronze. |
 | **L** | Red, green and blue tech points, and town happiness. |
 | **Z** | Day of the week, day number and time of day. |
-| **G** | The zone you are standing in and its rating — the graveyard's quality, for example. |
+| **G** | The zone you are standing in and its rating — the graveyard's quality, for example. In the factory it goes on with the factory's state (see below). |
+| **Shift+G** / **Ctrl+G** | In the factory: the next / previous conveyor line. |
 | **Y** | What you carry overhead (and, for a supply crate, where it goes), then what is in the four hotbar slots and how many of each you are carrying. |
 | **O** | In a window: full details of the focused item — name, stars, how many you have, and its tooltip or description. Anywhere else a tooltip is showing, reads it again in full. |
 
@@ -319,8 +320,25 @@ switch tabs. After choosing an entry you place it:
 | **Space** or **End** | Jump to the nearest free spot; press again for the next one. Buildings that need a marked plot (a grave on a grave plot) are tried on every such plot. |
 | **Home** | Say again whether the spot is free, and where it is. |
 | **Enter** | Build here. |
-| **R** | Rotate — the game's own key; the mod says "rotated". |
+| **R** | Rotate — the game's own key; the mod says "rotated", and for a factory piece which way it now runs. |
 | **Escape** | Stop placing — the game's own key. |
+
+**Factory pieces** (belts, splitters, chests, factory workbenches) say more while placing. Each
+move, Home and R say which way a belt runs ("runs east") or where a piece's inputs and outputs are,
+and what it would join where it stands: "joins: takes from Chest to the west, sends east into
+the workbench". After Enter it says what it really joined. A belt's output end must touch the next
+piece, and a workbench only takes from a belt on one of its input sides.
+
+**The factory (G, Shift+G, Ctrl+G).** In the cellar factory, G adds to the zone: whether the
+factory runs, is paused, or stands still for lack of power (power against what the belts use — more
+zombies on the carousel give more power); each carousel with its zombies and free places; how many
+belt pieces and lines there are and how many have a problem; then every workbench, nearest first,
+with its zombie, what it makes, what it is missing, whether its output is blocked, and which of its
+input and output sides have no belt. Shift+G and Ctrl+G go through the lines, nearest first: where
+a line starts (a chest, a workbench, a splitter, or a belt nothing feeds), its belt pieces in
+compass steps ("belt pieces 4 east, 2 north"), and where it leads — "into" a workbench or chest, or a dead end,
+named with what it points at but is not joined to. Single belt pieces are left out of the object
+list; the lines cover them.
 
 **Remove mode ("Remove" in the building menu):** Space, End or Page down goes to the next building
 that can be removed here, nearest first (Shift+Space or Page up goes back); Home says the selected

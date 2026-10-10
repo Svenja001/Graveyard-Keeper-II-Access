@@ -18,6 +18,41 @@ internal static class ProgressAnnouncer
 
     internal static void Init(ManualLogSource log) => _log = log;
 
+    /// <summary>Achievement lines not said yet, oldest first.</summary>
+    private static readonly List<string> _achievements = new();
+
+    /// <summary>When the oldest waiting achievement unlocked (unscaled time).</summary>
+    private static float _achievementSince;
+
+    /// <summary>How long speech must have been quiet before an achievement is said.</summary>
+    private const float QuietBeforeAchievement = 1.5f;
+
+    /// <summary>Said anyway after this long, so a scene that never gives control back cannot swallow it.</summary>
+    private const float AchievementMaxWait = 90f;
+
+    /// <summary>Says the waiting achievements once no scene or dialogue holds the player and speech is quiet.</summary>
+    internal static void Update()
+    {
+        if (_achievements.Count == 0) return;
+        try
+        {
+            var now = Time.unscaledTime;
+            var player = MainGame.PlayerController;
+            var busy = CutsceneAnnouncer.InCutscene || (player != null && !player.IsControlsEnabled)
+                       || now - ScreenReader.LastSpokenAt < QuietBeforeAchievement;
+            if (busy && now - _achievementSince < AchievementMaxWait) return;
+
+            var text = string.Join(". ", _achievements);
+            _achievements.Clear();
+            ScreenReader.Say(text, interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            _achievements.Clear();
+            _log?.LogError($"[Progress] Saying the achievement failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     [HarmonyPatch(typeof(UIInspirationNotification), nameof(UIInspirationNotification.Draw))]
     [HarmonyPostfix]
     private static void UIInspirationNotification_Draw(UIInspirationNotification __instance)
@@ -60,6 +95,13 @@ internal static class ProgressAnnouncer
     /// <summary>
     /// Also runs on load for achievements the save has but Steam was never told about, so one
     /// Steam already holds is skipped - Steam makes no sound for it either.
+    ///
+    /// <para>
+    /// Not said at once: story achievements unlock in the middle of the scene that earns them, and
+    /// a queued line there was talked over by the scene's own lines and the keys pressed right
+    /// after it - "A Night to Remember" was unlocked and never heard (log of 2026-10-09). It waits
+    /// in <see cref="Update"/> until the scene is over and speech has been quiet for a moment.
+    /// </para>
     /// </summary>
     [HarmonyPatch(typeof(AchievementsSystem), "TryUnlockAchievementOnPlatform")]
     [HarmonyPrefix]
@@ -81,8 +123,9 @@ internal static class ProgressAnnouncer
                 name = string.IsNullOrWhiteSpace(local) ? platformId : local;
             }
 
-            _log?.LogInfo($"[Progress] Achievement unlocked: '{platformId}' => \"{name}\".");
-            ScreenReader.Say(Loc.Fmt("progress.achievement", name), interrupt: false);
+            _log?.LogInfo($"[Progress] Achievement unlocked: '{platformId}' => \"{name}\"; said once the scene is over.");
+            _achievements.Add(Loc.Fmt("progress.achievement", name));
+            if (_achievements.Count == 1) _achievementSince = Time.unscaledTime;
         }
         catch (Exception ex)
         {

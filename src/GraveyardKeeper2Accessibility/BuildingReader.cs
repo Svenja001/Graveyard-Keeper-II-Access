@@ -213,6 +213,7 @@ internal static class BuildingReader
     {
         _controller = __instance;
         _spots = null;
+        _placedByMod = false;
         try
         {
             // "Entfernen" in the build menu uses the same mode with no building; the free-spot
@@ -231,6 +232,7 @@ internal static class BuildingReader
             var line = Loc.Fmt("build.mode_on", name);
             var extension = PlacingExtension(buildData);
             if (extension != null) line = $"{line}. {Loc.Fmt("build.ext_intro", ObjectStatus.ParentNames(extension))}";
+            if (IsConveyorBuild(buildData)) line = $"{line}. {Loc.Get("factory.build_hint")}";
             ScreenReader.Say(line);
         }
         catch (Exception ex)
@@ -244,6 +246,8 @@ internal static class BuildingReader
     private static void BuildController_DisableBuildMode()
     {
         _spots = null;
+        _rotationSayFrame = 0;
+        _placedByMod = false;
         if (_controller == null) return;
         ScreenReader.Say(Loc.Get("build.mode_off"));
     }
@@ -258,6 +262,8 @@ internal static class BuildingReader
 
         try
         {
+            SayPendingRotation();
+
             if (InputLocked(_controller)) return true;
 
             if (IsRemoveMode)
@@ -566,6 +572,7 @@ internal static class BuildingReader
         LastSnapped(_controller) = snapped;
         LastCursor(_controller) = CameraSystem.WorldToScreenPoint(snapped);
         _controller.UpdatePointerObjectPosition(snapped);
+        _placedByMod = true;
         return CanBuildHere();
     }
 
@@ -575,7 +582,51 @@ internal static class BuildingReader
         LastSnapped(_controller) = position;
         LastCursor(_controller) = CameraSystem.WorldToScreenPoint(position);
         _controller.UpdatePointerObjectPosition(position);
+        _placedByMod = true;
         return CanBuildHere();
+    }
+
+    /// <summary>True while the pointer stands where the mod put it and the player has not steered it since.</summary>
+    private static bool _placedByMod;
+
+    /// <summary>
+    /// Keeps the pointer where the mod put it while the camera catches up.
+    ///
+    /// <para>
+    /// Every frame the game re-aims the pointer through the camera: the pointer's spot to the
+    /// screen, clamped to the screen's edge (<c>GetCursorPosition</c> → <c>SnapToBounds</c>), and
+    /// back to the ground by a raycast. The build camera follows the pointer only over the next
+    /// frames, so a free spot off screen - the first one End finds, usually, since the camera still
+    /// looks at the player - was pulled to the edge of the screen at once, onto ground that was
+    /// blocked, and Enter there said "cannot build here". The spots after it lay near the first, on
+    /// screen by then, and worked (user, 2026-10-10: "the first spot is always not buildable").
+    /// So a clamped re-aim is skipped until the player steers the pointer with the game's own input.
+    /// </para>
+    /// </summary>
+    [HarmonyPatch(typeof(BuildController), "UpdatePointerAtPos")]
+    [HarmonyPrefix]
+    private static bool BuildController_UpdatePointerAtPos(BuildController __instance, Vector3 pos, bool forceUpdate)
+    {
+        if (!_placedByMod || forceUpdate || __instance != _controller) return true;
+        try
+        {
+            Vector3 steer = LazyInput.GetDirection();
+            if (!LazyInput.IsGamepadActive || steer.sqrMagnitude > 0f
+                || LazyInput.GetKey(GameKey.DpadUp) || LazyInput.GetKey(GameKey.DpadDown)
+                || LazyInput.GetKey(GameKey.DpadLeft) || LazyInput.GetKey(GameKey.DpadRight))
+            {
+                _placedByMod = false;
+                return true;
+            }
+
+            // Unclamped, the re-aim lands on the same spot and does nothing; only a clamp moves it.
+            var aim = CameraSystem.WorldToScreenPoint(LastSnapped(__instance));
+            return Mathf.Abs(aim.x - pos.x) < 0.5f && Mathf.Abs(aim.y - pos.y) < 0.5f;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static bool CanBuildHere()
@@ -592,7 +643,7 @@ internal static class BuildingReader
             ? ""
             : Navigator.KeyDirections(new Vector2(cursor.x - player.MovablePosition.x, cursor.z - player.MovablePosition.z));
         var state = StateText();
-        var link = LinkText() ?? AddOnRoomText();
+        var link = FactoryReader.Placement(PointerWgo()) ?? LinkText() ?? AddOnRoomText();
         if (link != null) state = $"{state}, {link}";
         ScreenReader.Say(Loc.Fmt("build.cursor", state, where), interrupt);
     }
@@ -1698,6 +1749,7 @@ internal static class BuildingReader
 
         var pointer = Pointer(_controller);
         var name = BuildingName(CurrentBuild(_controller));
+        FactoryReader.BeginBuild();
         if (!pointer.TryBuildActionInput())
         {
             ScreenReader.Say(Loc.Get("build.failed"));
@@ -1707,7 +1759,8 @@ internal static class BuildingReader
         Log?.LogInfo($"[Build] Built '{CurrentBuild(_controller)?.WgoId}' at {CurPos(_controller)}.");
         _spots = null;
         AfterChange(modulesWidget: true);
-        ScreenReader.Say(Loc.Fmt("build.built", name));
+        var links = FactoryReader.BuiltLinks();
+        ScreenReader.Say(links == null ? Loc.Fmt("build.built", name) : $"{Loc.Fmt("build.built", name)}. {links}");
     }
 
     private static void SayIfNoRotation()
@@ -1727,7 +1780,41 @@ internal static class BuildingReader
     private static void BuildPointer_Rotate()
     {
         _spots = null;
+
+        // A factory piece's connectors only stand in their new places once the turned piece is
+        // laid out, so which way it runs is said a couple of frames later.
+        if (FactoryReader.IsConveyor(PointerWgo()))
+        {
+            _rotationSayFrame = Time.frameCount + 2;
+            return;
+        }
         ScreenReader.Say(Loc.Get("build.rotated"));
+    }
+
+    private static int _rotationSayFrame;
+
+    private static void SayPendingRotation()
+    {
+        if (_rotationSayFrame == 0 || Time.frameCount < _rotationSayFrame) return;
+        _rotationSayFrame = 0;
+        var placement = FactoryReader.Placement(PointerWgo());
+        ScreenReader.Say(placement == null ? Loc.Get("build.rotated") : Loc.Fmt("factory.rotated", placement));
+    }
+
+    /// <summary>The building on the pointer - a temporary copy standing where it would go.</summary>
+    private static Wgo PointerWgo() =>
+        _controller != null && Pointer(_controller)?.PointerObject is WgoBuildPointer pointer ? PointerTarget(pointer) : null;
+
+    private static bool IsConveyorBuild(BuildData data)
+    {
+        try
+        {
+            return data?.WgoId != null && GameBalance.Me.conveyorWgosCache.ContainsKey(data.WgoId);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>What the game does a physics step after a build or a rotation - see <c>UpdateBuildModeInput</c>.</summary>

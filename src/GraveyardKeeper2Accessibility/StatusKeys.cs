@@ -12,7 +12,7 @@ namespace GraveyardKeeper2Accessibility;
 ///   <item><b>R</b> - money</item>
 ///   <item><b>P</b> - red, green and blue tech points, and town happiness</item>
 ///   <item><b>Q</b> - day of the week, day number and time (the day wheel)</item>
-///   <item><b>G</b> - the zone you are in and its rating (the zone label)</item>
+///   <item><b>G</b> - the zone you are in and its rating (the zone label); in the factory, its state too</item>
 ///   <item><b>Y</b> - what is carried overhead, then the four hotbar slots</item>
 ///   <item><b>O</b> - full details of the focused item, or the tooltip on screen again</item>
 /// </list>
@@ -225,6 +225,22 @@ internal static class StatusKeys
         var player = ResourceAnnouncer.CurrentPlayer();
         if (player == null) { NotInGame(); return; }
 
+        // In the cellar factory, its power, lines and workbenches follow the zone (user, 2026-10-10).
+        var line = ZoneLine(player);
+        string factory = null;
+        try
+        {
+            factory = FactoryReader.Status();
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Status] Could not read the factory: {ex.Message}");
+        }
+        Say(factory == null ? line : $"{line}. {factory}");
+    }
+
+    private static string ZoneLine(PlayerData player)
+    {
         if (player.insideTownZones != null && player.insideTownZones.Count > 0)
         {
             var line = Loc.Fmt("status.town", TmpText.Clean(LLBase.L("town_zone")),
@@ -234,32 +250,24 @@ internal static class StatusKeys
             if (sub != null && sub.Count > 0 && sub[sub.Count - 1] != null)
                 line += ", " + TmpText.Clean(LLBase.L(sub[sub.Count - 1].id));
 
-            Say(line);
-            return;
+            return line;
         }
 
         var zone = player.CurrentWorldZoneData;
         var display = zone?.Definition?.displayType ?? WorldZoneDef.DisplayType.None;
         if (zone == null || display == WorldZoneDef.DisplayType.Hidden)
-        {
-            Say(Loc.Get("status.no_zone"));
-            return;
-        }
+            return Loc.Get("status.no_zone");
 
         var name = TmpText.Clean(LLBase.L("wz_" + zone.id));
 
         var showsQuality = zone.IsContainer
                            && display != WorldZoneDef.DisplayType.None
                            && (zone.id != "resurrection" || player.GetResInt("zombies_limit_mechanic") != 0);
-        if (!showsQuality)
-        {
-            Say(name);
-            return;
-        }
+        if (!showsQuality) return name;
 
         var raw = zone.GetQualityString();
         _log?.LogInfo($"[Status] Zone '{zone.id}' quality string: {raw}");
-        Say(Loc.Fmt("status.zone_rating", name, TmpText.Clean(raw)));
+        return Loc.Fmt("status.zone_rating", name, TmpText.Clean(raw));
     }
 
     // ---- Y ------------------------------------------------------------------------------------
@@ -352,7 +360,7 @@ internal static class StatusKeys
     /// A letter typed into a text field - naming a zombie, naming a save - is not a request for
     /// the time of day.
     /// </summary>
-    private static bool IsTyping()
+    internal static bool IsTyping()
     {
         try
         {

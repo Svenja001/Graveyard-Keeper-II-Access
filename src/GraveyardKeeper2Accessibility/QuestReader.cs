@@ -27,27 +27,61 @@ internal static class QuestReader
 
         // J is the key the Graveyard Keeper mod used for the quest list.
         _questsKey = ModKeys.Bind(config, "Keys", "Quests", new KeyboardShortcut(KeyCode.J),
-            "Reads the quests you currently have.");
+            "Opens the list of quests in progress. Up and Down step through it, J closes it.");
     }
 
-    internal static void Update()
+    private static List<string> _items;
+    private static int _index;
+
+    internal static bool IsOpen => _items != null;
+
+    /// <summary>
+    /// The quest list, opened with J. While it is open it owns the arrow keys: Up and Down step
+    /// through one quest at a time, Enter reads the current one again, and J closes it. Escape is left alone - the game opens its pause menu on it, and any
+    /// game window opening closes the list anyway.
+    ///
+    /// <para>
+    /// <b>Reported (2026-10-06):</b> J read every quest as one long sentence, finished ones among
+    /// them. A list the player can step through is what the GK1 mod did, and only quests in
+    /// progress are in it (see <see cref="ActiveQuests"/>).
+    /// </para>
+    /// <para>Returns true when the quest list used this frame's keys.</para>
+    /// </summary>
+    internal static bool Update()
     {
         try
         {
-            if (_questsKey != null && _questsKey.Value.IsDown()) SayQuests();
+            if (_items != null && (LazyWindowsStackController.ActiveWindow != null || ActiveQuests() == null))
+            {
+                Close(silent: true);
+                return false;
+            }
+
+            if (_questsKey != null && _questsKey.Value.IsDown())
+            {
+                if (_items != null) Close(silent: false);
+                else Open();
+                return true;
+            }
+
+            if (_items == null) return false;
+
+            var count = _items.Count;
+            if (Input.GetKeyDown(KeyCode.DownArrow)) Move((_index + 1) % count);
+            else if (Input.GetKeyDown(KeyCode.UpArrow)) Move((_index - 1 + count) % count);
+            else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) Move(_index);
+            else return false;
+            return true;
         }
         catch (Exception ex)
         {
             _log?.LogError($"[Quest] Key handling failed: {ex.GetType().Name}: {ex.Message}");
+            _items = null;
+            return false;
         }
     }
 
-    /// <summary>
-    /// Every quest currently in play, described. <c>QuestData.Description</c> resolves the right
-    /// locale key for the quest's state, so a finished one reads as finished rather than as a
-    /// standing instruction.
-    /// </summary>
-    private static void SayQuests()
+    private static void Open()
     {
         var quests = ActiveQuests();
         if (quests == null)
@@ -58,26 +92,9 @@ internal static class QuestReader
 
         LogBreakdown();
 
-        if (quests.Count == 0)
-        {
-            ScreenReader.Say(Loc.Get("quest.none"));
-            return;
-        }
-
-        var parts = new List<string>();
-        foreach (var quest in quests)
-        {
-            var text = TmpText.Clean(quest.Description);
-            if (string.IsNullOrWhiteSpace(text) || text == quest.id) text = null;
-
-            // What the game is actually waiting for. Many story steps have no text at all, and
-            // the ones that do describe the goal ("clear the path"), not the action that counts.
-            var step = quest.status == QuestStatus.InProgress ? NextStep(quest) : null;
-            if (step != null) text = text == null ? Loc.Fmt("quest.now", step) : Loc.Fmt("quest.with_step", text, step);
-
-            if (string.IsNullOrWhiteSpace(text) || parts.Contains(text)) continue;
-            parts.Add(text);
-        }
+        var parts = Describe(quests.Where(Shown));
+        var running = parts.Count;
+        parts.AddRange(Startable());
 
         if (parts.Count == 0)
         {
@@ -85,8 +102,104 @@ internal static class QuestReader
             return;
         }
 
-        _log?.LogInfo($"[Quest] {parts.Count} active: {string.Join(" | ", parts)}");
-        ScreenReader.Say(Loc.Fmt("quest.list", parts.Count, string.Join(". ", parts)));
+        _log?.LogInfo($"[Quest] {running} in progress, {parts.Count - running} to start: {string.Join(" | ", parts)}");
+        _items = parts;
+        _index = 0;
+        ScreenReader.Say(Loc.Fmt("quest.opened", running, parts.Count - running, Entry(0)), interrupt: true);
+    }
+
+    private static void Close(bool silent)
+    {
+        _items = null;
+        _index = 0;
+        if (!silent) ScreenReader.Say(Loc.Get("quest.closed"), interrupt: true);
+    }
+
+    private static void Move(int index)
+    {
+        _index = index;
+        ScreenReader.Say(Entry(index), interrupt: true);
+    }
+
+    private static string Entry(int index) => Loc.Fmt("quest.entry", index + 1, _items.Count, _items[index]);
+
+    /// <summary>
+    /// One line per quest: what the quest log says, and what the game is actually waiting for.
+    /// </summary>
+    private static List<string> Describe(IEnumerable<QuestData> quests)
+    {
+        var parts = new List<string>();
+        foreach (var quest in quests)
+        {
+            var text = Text(quest);
+
+            // What the game is actually waiting for. Many story steps have no text at all, and
+            // the ones that do describe the goal ("clear the path"), not the action that counts.
+            var step = NextStep(quest);
+            if (step != null) text = text == null ? Loc.Fmt("quest.now", step) : Loc.Fmt("quest.with_step", text, step);
+
+            if (string.IsNullOrWhiteSpace(text) || parts.Contains(text)) continue;
+            parts.Add(text);
+        }
+
+        return parts;
+    }
+
+    /// <summary>
+    /// A quest the quest screen shows. <b>Reported (2026-10-06):</b> most of J was
+    /// "quest_open_new_game_d" and the like - 31 of the 44 quests in progress in that save were the
+    /// game's own bookkeeping (<c>new_game</c>, <c>unlock_quarry_cave</c>, <c>repair_1104</c>),
+    /// flagged hidden and without any text. <c>QuestTreePageWidget.Display</c> skips
+    /// <c>isHidden</c>, and so does J. The navigator still reads them (see <see cref="ActiveQuests"/>):
+    /// a hidden repair quest is how it knows which ruin the story means.
+    /// </summary>
+    private static bool Shown(QuestData quest) => !quest.isHidden;
+
+    /// <summary>
+    /// Quests waiting to be begun: <c>Awaiting</c> means the game has registered the quest's start
+    /// check and starts it the moment that happens - "talk to the donkey". Hidden ones are kept,
+    /// since in that save every quest not begun was hidden; only those whose start can be said in
+    /// words are listed.
+    /// </summary>
+    private static List<string> Startable()
+    {
+        var parts = new List<string>();
+        try
+        {
+            var all = MainGame.Instance?.GameSave?.questSystemData?.questCollection?.quests;
+            if (all == null) return parts;
+
+            foreach (var quest in all)
+            {
+                if (quest == null || quest.status != QuestStatus.Awaiting || quest.Definition == null) continue;
+
+                var step = Step(quest.Definition.startCheck, quest.id);
+                if (step == null) continue;
+
+                var text = Text(quest);
+                var line = text == null ? Loc.Fmt("quest.to_start", step) : Loc.Fmt("quest.to_start_with_text", text, step);
+                if (!parts.Contains(line)) parts.Add(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Quest] Could not read the quests waiting to start: {ex.Message}");
+        }
+
+        return parts;
+    }
+
+    /// <summary>
+    /// The quest log's text for the quest, or null when it has none. <c>LLBase.L</c> hands the key
+    /// back when a string is missing, which is how "quest_open_new_game_d" came to be read out.
+    /// </summary>
+    private static string Text(QuestData quest)
+    {
+        var text = TmpText.Clean(quest.Description);
+        if (string.IsNullOrWhiteSpace(text) || text == quest.id) return null;
+        if (text.StartsWith("quest_open_", StringComparison.Ordinal) || text.StartsWith("quest_closed_", StringComparison.Ordinal))
+            return null;
+        return text;
     }
 
     /// <summary>
@@ -100,16 +213,21 @@ internal static class QuestReader
     /// what actually completes the quest.
     /// </para>
     /// </summary>
-    internal static string NextStep(QuestData quest)
+    internal static string NextStep(QuestData quest) => Step(quest?.Definition?.finishCheck, quest?.id);
+
+    /// <summary>A quest check - its finish or its start - in words; see <see cref="NextStep"/>.</summary>
+    private static string Step(QuestCheck check, string questId)
     {
         try
         {
-            var check = quest?.Definition?.finishCheck;
-            if (check == null || !check.hasTrigger) return null;
+            if (check == null) return null;
 
+            // A check can be a bare condition with no event: 166_base_donkey2_speak starts once
+            // PPar("wz_town")>=50, the town's quality. Then the conditions are the whole answer.
             var id = check.triggerId ?? "";
             var target = StoryListeners.BeforeColon(id);
-            string step;
+            string step = null;
+            if (check.hasTrigger)
             switch (check.triggerType)
             {
                 case GlobalEventsSystem.Event.Type.PlayerEnterGDZone:
@@ -117,6 +235,12 @@ internal static class QuestReader
                     break;
                 case GlobalEventsSystem.Event.Type.PlayerExitGDZone:
                     step = Loc.Fmt("quest.step.leave_zone", Navigator.Humanise(id));
+                    break;
+                // "object id:event": the event the story put on the object, whose last word picks
+                // its bubble (InteractionEvent) - and a speech bubble means talking, not "using".
+                case GlobalEventsSystem.Event.Type.CustomInteraction
+                    when id.IndexOf(':') > 0 && new InteractionEvent(id.Substring(id.IndexOf(':') + 1)).type == InteractionEvent.Type.Talk:
+                    step = Loc.Fmt("quest.step.talk", Name(target));
                     break;
                 case GlobalEventsSystem.Event.Type.Interaction:
                 case GlobalEventsSystem.Event.Type.CustomInteraction:
@@ -160,6 +284,14 @@ internal static class QuestReader
                 case GlobalEventsSystem.Event.Type.CloseUIWindow:
                     step = Loc.Get("quest.step.close_window");
                     break;
+                // Fired by the donkey's flowscripts when he sets off on his body run and when he
+                // reaches the morgue; the donkey's talks (165-167_base_donkey*_speak) start on them.
+                case GlobalEventsSystem.Event.Type.DonkeyStart:
+                    step = Loc.Get("quest.step.donkey_start");
+                    break;
+                case GlobalEventsSystem.Event.Type.DonkeyMorgue:
+                    step = Loc.Get("quest.step.donkey_morgue");
+                    break;
                 default:
                     return null;
             }
@@ -175,11 +307,12 @@ internal static class QuestReader
                 }
             }
 
+            if (step == null) return unmet.Count == 0 ? null : string.Join(", ", unmet);
             return unmet.Count == 0 ? step : Loc.Fmt("quest.step_needs", step, string.Join(", ", unmet));
         }
         catch (Exception ex)
         {
-            _log?.LogWarning($"[Quest] Could not describe the step of '{quest?.id}': {ex.Message}");
+            _log?.LogWarning($"[Quest] Could not describe the step of '{questId}': {ex.Message}");
             return null;
         }
     }
@@ -237,7 +370,10 @@ internal static class QuestReader
         }
     }
 
-    /// <summary>The quests worth telling the player about, or null when not in a game.</summary>
+    /// <summary>
+    /// Every quest in progress, the game's hidden bookkeeping ones included, or null when not in a
+    /// game. J reads only the <see cref="Shown"/> ones.
+    /// </summary>
     internal static List<QuestData> ActiveQuests()
     {
         try
@@ -251,11 +387,10 @@ internal static class QuestReader
             {
                 if (quest == null) continue;
 
-                // IsActiveQuest is the quest screen's own test, and it hides anything flagged
-                // unknown. A quest already in progress is one the player is doing right now, so it
-                // is included regardless - being told what you are in the middle of is not a
-                // spoiler.
-                if (quest.IsActiveQuest || quest.status == QuestStatus.InProgress) result.Add(quest);
+                // Only quests being done now. IsActiveQuest also passes Available and Awaiting -
+                // every quest not begun - and J read those out as open tasks (reported
+                // 2026-10-06). Awaiting ones are listed separately, by their start (Startable).
+                if (quest.status == QuestStatus.InProgress) result.Add(quest);
             }
 
             return result;
@@ -280,8 +415,9 @@ internal static class QuestReader
         // collection keeps them in the order they were added.
         for (var i = quests.Count - 1; i >= 0; i--)
         {
-            var text = TmpText.Clean(quests[i].Description);
-            if (!string.IsNullOrWhiteSpace(text)) return text;
+            if (!Shown(quests[i])) continue;
+            var text = Text(quests[i]);
+            if (text != null) return text;
         }
 
         return null;

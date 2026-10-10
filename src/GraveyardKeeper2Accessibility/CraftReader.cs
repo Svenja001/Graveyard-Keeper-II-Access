@@ -438,6 +438,8 @@ internal static class CraftReader
                     break;
                 case UIGardenBedWindow garden when cell != null && cell == G.GardenSeedCell(garden):
                     return GardenSeedLine(garden);
+                case UIGardenBedWindow garden when item.GetComponentInParent<UIGardenBedSlot>() is UIGardenBedSlot slot:
+                    return FertilizerSlotText(garden, slot);
             }
         }
         catch (Exception ex)
@@ -907,9 +909,56 @@ internal static class CraftReader
         else
         {
             parts.Add(Loc.Get("craft.garden_empty"));
-            parts.Add(GardenSeedLine(window));
         }
+        parts.Add(FertilizerLine(data.WgoData, sayNone: !data.IsGrowing));
+        if (!data.IsGrowing) parts.Add(GardenSeedLine(window));
         return Join(parts.ToArray());
+    }
+
+    /// <summary>
+    /// The fertilizers on a bed, by name. On screen they are icons in the bed window's slots
+    /// (<c>UIGardenBedSlot.DrawFertilizerSlot</c> draws a picture, not an item), so the slot read
+    /// "empty" with fertilizer in it and nothing said whether a bed was fertilized (user,
+    /// 2026-10-10). The game keeps them as perks on the bed (<c>perk_fertilize_*</c>).
+    /// </summary>
+    internal static List<string> FertilizerNames(WgoData data)
+    {
+        var names = new List<string>();
+        if (data?.ActivePerks == null) return names;
+        foreach (var perk in data.ActivePerks)
+        {
+            var def = perk?.Definition;
+            if (def == null || !def.IsFertilizerPerk) continue;
+            names.Add(PerkName(def));
+        }
+        return names;
+    }
+
+    private static string PerkName(PerkDef def) =>
+        !string.IsNullOrEmpty(def.fertilizerItemId) ? ItemText.Name(def.fertilizerItemId) : TmpText.Clean(LLBase.L(def.id));
+
+    /// <summary>"Fertilized: X", or "no fertilizer" when <paramref name="sayNone"/> and the player has fertilizer slots at all.</summary>
+    internal static string FertilizerLine(WgoData data, bool sayNone)
+    {
+        var names = FertilizerNames(data);
+        if (names.Count > 0) return Loc.Fmt("craft.garden_fertilized", string.Join(", ", names));
+        var slots = SafeInt(() => MainGame.PlayerData.GetResInt("g_garden_fertilizer_slots"));
+        return sayNone && slots > 0 ? Loc.Get("craft.garden_no_fertilizer") : null;
+    }
+
+    /// <summary>A fertilizer slot of the bed window: what is in it, or how to fill it.</summary>
+    private static string FertilizerSlotText(UIGardenBedWindow window, UIGardenBedSlot slot)
+    {
+        var data = G.GardenData(window);
+        if (data == null) return null;
+        if (slot.PerkData?.Definition is PerkDef def)
+        {
+            var bonus = def.craftMasteryBonus;
+            var text = Loc.Fmt("craft.fertilizer_slot", PerkName(def));
+            return bonus > 0 ? Join(text, Loc.Fmt("craft.fertilizer_bonus", bonus, TalentName("talent_green"))) : text;
+        }
+        // While something grows the same widget shows the seed, which the item reading covers.
+        return data.IsGrowing ? null : Loc.Get("craft.fertilizer_slot_empty");
     }
 
     private static string GardenSeedLine(UIGardenBedWindow window)

@@ -130,6 +130,7 @@ internal static class StoryListeners
     }
 
     private static readonly Regex Call = new Regex(@"^(\w+)\(\s*""([^""]+)""", RegexOptions.Compiled);
+    private static readonly Regex Threshold = new Regex(@"\)\s*>=?\s*(\d+)", RegexOptions.Compiled);
 
     internal static string DescribeUnmet(string part)
     {
@@ -143,6 +144,20 @@ internal static class StoryListeners
         catch
         {
             return null;
+        }
+
+        // PPar("wz_town")>=50: a zone's quality - the sum over everything built and repaired in it
+        // (WorldZoneData.GetTotalQuality). The donkey's second talk waits on the town's.
+        if (m.Groups[1].Value == "PPar" && m.Groups[2].Value.StartsWith("wz_", StringComparison.Ordinal))
+        {
+            var at = Threshold.Match(part);
+            if (!at.Success) return null;
+            var zone = TmpText.Clean(LLBase.L(m.Groups[2].Value));
+            if (string.IsNullOrWhiteSpace(zone) || zone == m.Groups[2].Value) zone = Navigator.Humanise(m.Groups[2].Value.Substring(3));
+            float now;
+            try { now = MainGame.PlayerData.GetRes(m.Groups[2].Value); }
+            catch { return null; }
+            return Loc.Fmt("story.need_zone_quality", zone, at.Groups[1].Value, Mathf.FloorToInt(now));
         }
 
         var name = ItemText.Name(m.Groups[2].Value);
