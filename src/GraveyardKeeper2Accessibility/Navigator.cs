@@ -68,7 +68,7 @@ internal static class Navigator
 
     private static bool _fightMode;
 
-    /// <summary>Everything currently spawned. Maintained by events, never scanned.</summary>
+    /// <summary>Everything currently spawned. Maintained by events, never scanned; see <see cref="Prune"/>.</summary>
     private static readonly HashSet<Wgo> Spawned = new();
 
     /// <summary>Every live object view, for other components that need to look around the player.</summary>
@@ -151,6 +151,32 @@ internal static class Navigator
     private static void OnDestroy(Wgo wgo)
     {
         if (wgo != null) Spawned.Remove(wgo);
+    }
+
+    private const float PruneInterval = 5f;
+    private static float _nextPrune;
+
+    /// <summary>
+    /// Drops destroyed objects from <see cref="Spawned"/>. The game raises OnWgoDestroy only when
+    /// an object's data is removed, not when a scene or chunk unloads or a custom destroy moment
+    /// takes over, so without this every area visited stays in the set for the whole session and
+    /// everything that walks it - the fight watcher twice a second among them - slows down with
+    /// play time.
+    /// </summary>
+    internal static void Prune()
+    {
+        if (Time.unscaledTime < _nextPrune) return;
+        _nextPrune = Time.unscaledTime + PruneInterval;
+
+        try
+        {
+            var removed = Spawned.RemoveWhere(w => w == null);
+            if (removed > 0) _log?.LogInfo($"[Nav] Pruned {removed} destroyed object(s); {Spawned.Count} still spawned.");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[Nav] Pruning failed: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     internal static void Update()

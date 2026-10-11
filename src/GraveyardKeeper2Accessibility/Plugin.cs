@@ -234,6 +234,7 @@ public class Plugin : BaseUnityPlugin
         }
 
         // Not a key, so it runs even when the keys have been given up on.
+        Navigator.Prune();
         ResourceAnnouncer.Update();
         StoryRepair.Update();
         EquipmentAnnouncer.Update();
