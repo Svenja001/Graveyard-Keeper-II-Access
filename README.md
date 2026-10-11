@@ -128,8 +128,6 @@ the game's own event for it, exactly as walking in would have.
 - **If a scene ends and only the mod's keys still work,** press Ctrl+F5 twice to take your controls
   back. That should not happen any more, but it is there in case it does.
 - **Not covered yet:** the map page in the character window (only the travel stone's map is read).
-- **A game bug, not the mod:** in a German game, the first two main menu entries are read in
-  Russian. That is what the game itself has in that place.
 - Only Windows and the Steam version have been tried.
 
 ## Something went wrong?

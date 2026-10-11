@@ -32,7 +32,7 @@ and you lose only if they take your base. What you do is prepare, and move flags
 - **Squads** live in the town guard barracks, listed under **squads** with how many places are
   filled and how strong they are. Carry a zombie there and press E on a squad to put it in. A
   zombie only fights, and only adds strength, when it holds a **pike or bow and wears armour**.
-  The mercenaries are one more squad, paid for once.
+  The mercenaries are one more squad, paid for once in every fight.
 - **Defence power** (the "Barracks" in quest texts) is the strength of your barricades and towers
   plus the squads you choose for a fight. Shift+F4 adds it up.
 - **The pre-fight window** opens when you pick a fight. It says the fight, how many squads you may
@@ -238,10 +238,10 @@ Space and F6 only do this while a station is open; elsewhere they keep their usu
 game turns out to have its own keyboard key for one of these actions, the mod leaves that key to the
 game and the station tells you which key it is.
 
-**Planting many beds with a seed in hand** (the game's own quick way): choose **Pflanzen** on a seed
+**Planting many beds with a seed in hand** (the game's own quick way): choose **plant** on a seed
 in the item menu (Shift+F10), or put the seeds on the hotbar and press their number outside the
-inventory. You hear "… in der Hand, noch 12". Now **E** on each empty bed plants it straight away —
-no bed window, no choosing the seed again — and says "… gepflanzt, noch 11", or why not (wrong bed,
+inventory. You hear "… in Hand, 12 left". Now **E** on each empty bed plants it straight away —
+no bed window, no choosing the seed again — and says "… planted, 11 left", or why not (wrong bed,
 no gardening mastery yet, a worker is assigned). The seed stays in hand until it runs out or **F**,
 Escape or Tab puts it away.
 
