@@ -1,3 +1,7 @@
+## 0.1.1
+
+improved performance in the objecttracker
+
 ## 0.1.0
 
 **The first release. Graveyard Keeper 2 can be played from a new game through the intro to the
