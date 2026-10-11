@@ -92,7 +92,7 @@ internal static class Reachability
                 foreach (var offset in Probes)
                 {
                     var probe = position + offset;
-                    var nearest = graph.GetNearest(probe);
+                    var nearest = NearestWithin(graph, probe, ProbeSearch);
                     if (nearest.node == null || !nearest.node.Walkable) continue;
                     if (Flat(nearest.position - position) > MaxReach) continue;
 
@@ -291,8 +291,28 @@ internal static class Reachability
     private static bool HasFloorNear(Pathfinding.NavGraph graph, Vector3 position)
     {
         if (graph == null) return false;
-        var nearest = graph.GetNearest(position);
+        var nearest = NearestWithin(graph, position, ParkedSearch);
         return nearest.node != null && Flat(nearest.position - position) <= ParkedDistance;
+    }
+
+    /// <summary>
+    /// <c>GetNearest</c> that gives up past <paramref name="max"/> metres - otherwise the same call
+    /// (<c>NearestNodeConstraint.None</c>, Euclidean). Unbounded, it searches out to the game's
+    /// global limit, and a search with no floor close by is slow.
+    ///
+    /// <para>
+    /// <b>Reported (2026-10-11): the object list was slow at home and in the vineyard.</b> Each
+    /// rebuild took 200-420 ms there against 40-60 ms elsewhere, nearly all of it in the per-object
+    /// checks. In the house the player's floor is the small interior graph, and every object
+    /// outside within range missed it on all 17 probes - each a long search for floor that is not
+    /// there.
+    /// </para>
+    /// </summary>
+    private static Pathfinding.NNInfo NearestWithin(Pathfinding.NavGraph graph, Vector3 at, float max)
+    {
+        var constraint = Pathfinding.NearestNodeConstraint.None;
+        constraint.maxDistance = max;
+        return graph.GetNearest(at, constraint);
     }
 
     /// <summary>
@@ -300,6 +320,13 @@ internal static class Reachability
     /// the mesh - a building, or a bridge (the navmesh has no floor on those).
     /// </summary>
     private const float ParkedDistance = 15f;
+
+    /// <summary>
+    /// Search limit for <see cref="HasFloorNear"/>. The limit is a straight-line distance and the
+    /// test is a flat one, so floor 15 m away on the map but well above or below still has to be
+    /// found.
+    /// </summary>
+    private const float ParkedSearch = 30f;
 
     /// <summary>Graph indices per scene; the game logs an error for every unknown scene asked about.</summary>
     private static readonly Dictionary<string, List<int>> GraphIndices = new();
@@ -326,6 +353,12 @@ internal static class Reachability
 
     /// <summary>How far above or below the floor a thing may be and still be used from it.</summary>
     private const float MaxClimb = 2.5f;
+
+    /// <summary>
+    /// Search limit for one probe in <see cref="CanReach"/>: past this, floor fails the reach or
+    /// the climb test anyway (the probe is up to 3 m from the thing).
+    /// </summary>
+    private const float ProbeSearch = MaxReach + 3f + MaxClimb;
 
     private static readonly Vector3[] Probes = BuildProbes();
 

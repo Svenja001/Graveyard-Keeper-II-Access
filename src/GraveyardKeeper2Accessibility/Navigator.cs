@@ -382,10 +382,21 @@ internal static class Navigator
     /// </summary>
     private static void RebuildTargets(Vector3 from)
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var lap = 0L;
+        string Lap()
+        {
+            var now = clock.ElapsedMilliseconds;
+            var took = now - lap;
+            lap = now;
+            return took.ToString();
+        }
+
         AllTargets.Clear();
         RefreshQuestTokens();
         Reachability.Refresh(NavRange);
         _hiddenCount = 0;
+        var setup = Lap();
 
         var fight = InFight;
 
@@ -438,16 +449,42 @@ internal static class Navigator
                 AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, "new", Loc.Fmt("new.ready", ItemText.Name(data.id)), data));
         }
 
+        var spawned = Lap();
         AddGroundDrops(from);
+        var drops = Lap();
         if (!fight) AddFarHives(from);
+        var hives = Lap();
         AddStoryZones(from);
+        var zones = Lap();
         AddCapturePoints(from);
         AddFarStorySteps();
+        var far = Lap();
 
         if (fight)
         {
             AddFightUnits(from);
             AllTargets.RemoveAll(t => Array.IndexOf(FightPriority, t.CategoryKey) < 0);
+        }
+
+        // Reported (2026-10-11): the list gets slower over a long session while the number of
+        // objects stays flat, so something per keypress grows. Timed by stage until it is found.
+        _lastTiming = $"{clock.ElapsedMilliseconds} ms (setup {setup}, nearby {spawned} of {Spawned.Count}, " +
+                      $"ground {drops} of {_dropCount}, hives {hives}, zones {zones}, far {far}; world {WorldObjectCount()})";
+    }
+
+    private static string _lastTiming = "";
+    private static int _dropCount;
+
+    private static int WorldObjectCount()
+    {
+        try
+        {
+            var world = MainGame.WorldData;
+            return world != null && world.HasCache ? world.Cache.wgoDataByUidCache.Count : -1;
+        }
+        catch
+        {
+            return -1;
         }
     }
 
@@ -910,6 +947,7 @@ internal static class Navigator
         {
             var manager = LazySingleton<GameSceneManager>.Instance;
             var scenes = manager == null ? null : manager.LoadedGameScenes;
+            _dropCount = 0;
             if (scenes == null) return;
 
             foreach (var scene in scenes)
@@ -917,6 +955,7 @@ internal static class Navigator
                 var sceneData = scene == null ? null : scene.GameSceneData;
                 if (sceneData == null || sceneData.droppedItems == null) continue;
 
+                _dropCount += sceneData.droppedItems.Count;
                 foreach (var drop in sceneData.droppedItems)
                 {
                     if (drop == null || drop.IsRemoving || string.IsNullOrEmpty(drop.Id)) continue;
@@ -1175,7 +1214,7 @@ internal static class Navigator
         Categories.Clear();
         Categories.AddRange(present);
         Categories.Sort(CompareCategories);
-        _log?.LogInfo($"[Nav] {AllTargets.Count} objects in {Categories.Count} categories ({string.Join(", ", Categories)}); {_hiddenCount} left out as unusable or out of reach.");
+        _log?.LogInfo($"[Nav] {AllTargets.Count} objects in {Categories.Count} categories ({string.Join(", ", Categories)}); {_hiddenCount} left out as unusable or out of reach. Took {_lastTiming}.");
 
         var news = string.Join(", ", AllTargets.Where(t => t.CategoryKey == "new")
             .Select(t => $"{t.Id} [{string.Join("/", t.Data?.Events?.Select(e => e.str) ?? Enumerable.Empty<string>())}]"));
