@@ -1153,6 +1153,9 @@ internal static class Navigator
             && ((words.Length > 0 && words[0] == "tp") || Has("door", "doors", "gate", "hatch", "entrance", "teleport")))
             return "doors";
 
+        // The crow nest (2026-10-13 update) holds what lay on the ground for two days; a take-only chest.
+        if (type == WGODef.InteractionType.CrowNest) return "wgo." + WGODef.InteractionType.Chest;
+
         if (type == WGODef.InteractionType.Ladder || Has("ladder", "stairs", "staircase")) return "ladders";
         // Fight barricades are typed Barricade and hold squad flags; only the story's ones are in the way.
         if (type != WGODef.InteractionType.Barricade && Has("blockage", "barricade", "debris", "blocked", "rubble", "junk")) return "obstacles";

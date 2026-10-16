@@ -268,7 +268,7 @@ public class Plugin : BaseUnityPlugin
             StatusKeys.Update();
             FactoryReader.Update();
 
-            if (_repeatKey.Value.IsDown() && !NotesReader.TryRepeat() && !BodyWindowsReader.TryRepeat() &&
+            if (_repeatKey.Value.IsDown() && !NotesReader.TryRepeat() && !BodyWindowsReader.TryRepeat() && !ChestButtons.TryRepeat() &&
                 !CraftReader.TryRepeat() && !StationsReader.TryRepeat() && !TreesReader.TryRepeat() &&
                 !BindingsReader.TryRepeat() && !VendorReader.TryRepeat() && !TravelMapReader.TryRepeat())
                 UiNarrator.RepeatFocus();

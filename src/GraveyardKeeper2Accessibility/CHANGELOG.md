@@ -1,3 +1,20 @@
+## 0.1.2
+
+* **Chests: "move all identical items to the chest" can be reached.** Up arrow from the top row
+lands on it, Enter presses it, and you hear what was moved.
+* **Arrowing onto something that reads the same as the last thing is no longer silent.** Unknown
+recipes and empty slots used to say nothing after the first, so counting them came out short.
+* **Recipes say their position**, "5 of 24", matching the count the station names when it opens.
+**C / Shift+C** at a workbench goes to the next / previous learned recipe and round again, through every
+group.
+* **Game update of 13 October:** the crow nest is listed with the chests, and says that you can
+only take things out of it. Order slots locked by town population say how many citizens they
+need. Auto-walk waits while an area loads.
+* **Achievements are said again**, including the counted ones (fish caught, orders, sermons,
+inspirations), which Steam unlocks by itself and the mod used to take for old ones.
+* **Finished inspirations, new perks, achievements and learned technologies can no longer be cut
+off** by the line said right after them; for a moment, everything else waits its turn.
+
 ## 0.1.1
 
 improved performance in the objecttracker

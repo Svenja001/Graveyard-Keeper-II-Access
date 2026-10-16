@@ -157,6 +157,7 @@ So there are two sets of keys that both work, and neither disturbs the other:
 | **W / A / S / D** | The same thing, using the game's own bindings. |
 | **Enter** | Activate the focused control — added by the mod. |
 | **F6** | In a chest, shop or conveyor chest: jump between your bag, the chest and the conveyor slots. The side is also named whenever you arrow into it. |
+| **Up arrow, then Enter** | In a chest: Up from the top row lands on "Move all identical items to the chest", and Enter puts everything you carry that the chest already holds into it — added by the mod. Down goes back. The game hides this button unless you use the mouse. |
 | **Space** | On an item in a chest, shop or your bag: move it to the other side (out of the chest into your bag, or back) — added by the mod. The game only offers this on a controller or the right mouse button. |
 | **1 – 4** | On an item in your inventory (character page): put it on that hotbar slot — added by the mod. You hear "… on hotbar slot 2", and what it replaced. Items that cannot be used from the hotbar say so. Inventory items already on the hotbar say "hotbar 2". |
 | **Shift+F10** or the **Applications key** | On an item in your inventory: open its menu — use, plant or equip, put on the hotbar, destroy — without using the item. Arrows and Enter choose; greyed-out entries say "unavailable". Destroying removes the whole stack at once, with no question asked, and says what was destroyed. — added by the mod |
@@ -220,6 +221,7 @@ and **F8** reads it again at any time.
 | **F** | Make it: craft, place fuel, mix, study, plant. The game's own key for crafting; the mod makes it work at the alchemy table, study table and garden bed too. If it cannot be done, F says why. |
 | **Space** | In a recipe's setup window: add it to the station's queue instead of starting it now — for zombies, or for later. |
 | **F6** | At a workbench or furnace: jump between the recipe list and the queue. |
+| **C / Shift+C** | At a workbench or furnace: next / previous learned recipe, in the order the station counts them, going round at the ends; unknown recipes are skipped. Each recipe says its position, "5 of 24". The arrows move through the recipe grid row by row and stop at the end of each row. |
 | **Up / Down** | On the amount (the first cell in a recipe's setup window): more or fewer. On an ingredient that comes in several kinds ("any wood"): switch kind. In the queue: more or fewer of that order; down to zero removes it. |
 | **Left / Right** | At the alchemy table, on the result: more or fewer. |
 | **Ctrl+Left / Ctrl+Right** | In the queue: move an order earlier or later. |

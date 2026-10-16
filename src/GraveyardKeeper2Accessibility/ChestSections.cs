@@ -88,6 +88,10 @@ internal static class ChestSections
         return true;
     }
 
+    /// <summary>True for a cell on the player's side of a chest window.</summary>
+    internal static bool IsPlayerSide(GamepadNavigationItem item, out UIBaseChestWindow window) =>
+        SideOf(item, out window) == Side.Player;
+
     private static readonly AccessTools.FieldRef<GamepadNavigationController, List<GamepadNavigationItem>> Registered =
         AccessTools.FieldRefAccess<GamepadNavigationController, List<GamepadNavigationItem>>("selectableItems");
 

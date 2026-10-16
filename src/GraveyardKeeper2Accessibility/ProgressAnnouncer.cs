@@ -33,6 +33,7 @@ internal static class ProgressAnnouncer
     /// <summary>Says the waiting achievements once no scene or dialogue holds the player and speech is quiet.</summary>
     internal static void Update()
     {
+        WatchStatAchievements();
         if (_achievements.Count == 0) return;
         try
         {
@@ -44,7 +45,8 @@ internal static class ProgressAnnouncer
 
             var text = string.Join(". ", _achievements);
             _achievements.Clear();
-            ScreenReader.Say(text, interrupt: false);
+            _log?.LogInfo($"[Progress] Saying: \"{text}\"");
+            ScreenReader.SayProtected(text);
         }
         catch (Exception ex)
         {
@@ -65,7 +67,7 @@ internal static class ProgressAnnouncer
             var name = TmpText.Clean(LLBase.L(id));
             var talent = TreesReader.TalentName(__instance.InspirationTalentId);
             _log?.LogInfo($"[Progress] Inspiration completed: '{id}' ({__instance.InspirationTalentId}).");
-            ScreenReader.Say(Loc.Fmt("progress.inspiration_done", name, talent), interrupt: false);
+            ScreenReader.SayProtected(Loc.Fmt("progress.inspiration_done", name, talent));
         }
         catch (Exception ex)
         {
@@ -84,7 +86,7 @@ internal static class ProgressAnnouncer
 
             var name = TmpText.Clean(LLBase.L(def.linkedPerk));
             _log?.LogInfo($"[Progress] Perk revealed: '{def.linkedPerk}'.");
-            ScreenReader.Say(Loc.Fmt("progress.perk_revealed", name), interrupt: false);
+            ScreenReader.SayProtected(Loc.Fmt("progress.perk_revealed", name));
         }
         catch (Exception ex)
         {
@@ -110,26 +112,97 @@ internal static class ProgressAnnouncer
         try
         {
             if (string.IsNullOrEmpty(platformId)) return;
-
-            string name = null;
-            if (SteamManager.Initialized)
+            // Watched means it was still locked when its stat was sent just before - Steam unlocking
+            // it from that stat is this unlock, not one from an earlier session.
+            var watched = _statWatch.Remove(platformId);
+            if (!watched && SteamManager.Initialized
+                && SteamUserStats.GetAchievement(platformId, out var already) && already)
             {
-                if (SteamUserStats.GetAchievement(platformId, out var already) && already) return;
-                name = SteamUserStats.GetAchievementDisplayAttribute(platformId, "name");
+                _log?.LogInfo($"[Progress] Unlock call for '{platformId}', which Steam already has; not said.");
+                return;
             }
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                var local = TmpText.Clean(LLBase.L(platformId));
-                name = string.IsNullOrWhiteSpace(local) ? platformId : local;
-            }
-
-            _log?.LogInfo($"[Progress] Achievement unlocked: '{platformId}' => \"{name}\"; said once the scene is over.");
-            _achievements.Add(Loc.Fmt("progress.achievement", name));
-            if (_achievements.Count == 1) _achievementSince = Time.unscaledTime;
+            QueueAchievement(platformId);
         }
         catch (Exception ex)
         {
             _log?.LogError($"[Progress] Achievement announce failed: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Counted achievements (fish caught, orders, sermons, inspirations) send their count to a Steam
+    /// stat before the unlock call, and Steam unlocks an achievement tied to that stat by itself -
+    /// with its sound. By the time <c>TryUnlockAchievementOnPlatform</c> runs, Steam already has it,
+    /// so the check there skipped it silently. Achievements still locked when their stat is sent are
+    /// watched for a while instead, and said when Steam reports them unlocked.
+    /// </summary>
+    [HarmonyPatch(typeof(AchievementsSystem), "TrySetAchievementProgressOnPlatform")]
+    [HarmonyPrefix]
+    private static void AchievementsSystem_TrySetProgress(object achievementData)
+    {
+        try
+        {
+            if (!SteamManager.Initialized
+                || achievementData is not ObjectLinkedToDefinition<AchievementDefinition> data) return;
+            var platformId = data.Definition?.GetIdForPlatformUnlock();
+            if (string.IsNullOrEmpty(platformId) || platformId == "-1") return;
+            if (SteamUserStats.GetAchievement(platformId, out var already) && already) return;
+            _statWatch[platformId] = Time.unscaledTime + StatWatchSeconds;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[Progress] Achievement progress watch failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Achievements whose Steam stat just moved, with when to stop watching them (unscaled time).</summary>
+    private static readonly Dictionary<string, float> _statWatch = new();
+
+    /// <summary>How long a stat-driven achievement is watched; the game flushes stats to Steam within this.</summary>
+    private const float StatWatchSeconds = 20f;
+
+    private static float _nextStatPoll;
+
+    private static void WatchStatAchievements()
+    {
+        if (_statWatch.Count == 0) return;
+        var now = Time.unscaledTime;
+        if (now < _nextStatPoll) return;
+        _nextStatPoll = now + 0.5f;
+        try
+        {
+            if (!SteamManager.Initialized) { _statWatch.Clear(); return; }
+            foreach (var pair in _statWatch.ToList())
+            {
+                if (SteamUserStats.GetAchievement(pair.Key, out var done) && done)
+                {
+                    _statWatch.Remove(pair.Key);
+                    QueueAchievement(pair.Key);
+                }
+                else if (now > pair.Value)
+                    _statWatch.Remove(pair.Key);
+            }
+        }
+        catch (Exception ex)
+        {
+            _statWatch.Clear();
+            _log?.LogError($"[Progress] Achievement watch failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void QueueAchievement(string platformId)
+    {
+        string name = null;
+        if (SteamManager.Initialized)
+            name = SteamUserStats.GetAchievementDisplayAttribute(platformId, "name");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            var local = TmpText.Clean(LLBase.L(platformId));
+            name = string.IsNullOrWhiteSpace(local) ? platformId : local;
+        }
+
+        _log?.LogInfo($"[Progress] Achievement unlocked: '{platformId}' => \"{name}\"; said once the scene is over.");
+        _achievements.Add(Loc.Fmt("progress.achievement", name));
+        if (_achievements.Count == 1) _achievementSince = Time.unscaledTime;
     }
 }

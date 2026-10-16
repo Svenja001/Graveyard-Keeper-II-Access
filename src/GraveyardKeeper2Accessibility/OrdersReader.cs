@@ -34,6 +34,11 @@ internal static class OrdersReader
             var day = Loc.Find("icon.day_pride") ?? "day_pride";
             var parts = new List<string>();
 
+            // Since the 2026-10-13 update the board has five slots, the later ones opening with the
+            // town's population. The game takes such a slot out of navigation, but says why on it.
+            if (data.IsPopulationLocked)
+                return Loc.Fmt("orders.population_locked", data.IndexInOrders + 1, data.PopulationRequired, data.PopulationCurrent);
+
             if (data.IsEmpty || data.VendorOrderData == null)
             {
                 parts.Add(data.IndexInOrders >= 0 ? Loc.Fmt("orders.empty_slot", data.IndexInOrders + 1) : Loc.Get("orders.empty"));

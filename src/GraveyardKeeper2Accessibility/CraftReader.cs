@@ -39,6 +39,8 @@ internal static class CraftReader
     internal static KeyboardShortcut StartKey => _startKey?.Value ?? new KeyboardShortcut(KeyCode.F);
     private static ConfigEntry<KeyboardShortcut> _queueKey;
     private static ConfigEntry<KeyboardShortcut> _zoneKey;
+    private static ConfigEntry<KeyboardShortcut> _nextRecipeKey;
+    private static ConfigEntry<KeyboardShortcut> _prevRecipeKey;
 
     /// <summary>The last window summary spoken, so a redraw of an unchanged window is not read twice.</summary>
     private static string _current;
@@ -101,6 +103,12 @@ internal static class CraftReader
 
         internal static readonly AccessTools.FieldRef<UICraftWindow, List<UICraftsTabWidget>> DisplayedTabs =
             AccessTools.FieldRefAccess<UICraftWindow, List<UICraftsTabWidget>>("displayedTabs");
+
+        internal static readonly AccessTools.FieldRef<UICraftsTabWidget, List<UICraftPreviewItemCell>> TabCells =
+            AccessTools.FieldRefAccess<UICraftsTabWidget, List<UICraftPreviewItemCell>>("cellWidgets");
+
+        internal static readonly AccessTools.FieldRef<GamepadNavigationController, List<GamepadNavigationItem>> NavItems =
+            AccessTools.FieldRefAccess<GamepadNavigationController, List<GamepadNavigationItem>>("selectableItems");
 
         internal static readonly AccessTools.FieldRef<UICraftWindow, bool> QueueSelected =
             AccessTools.FieldRefAccess<UICraftWindow, bool>("isQueueSelectedOnGamepad");
@@ -196,6 +204,13 @@ internal static class CraftReader
             "Crafting", "AddToQueue", new KeyboardShortcut(KeyCode.Space),
             "In a recipe's setup window: add it to the station's queue instead of starting it. Only " +
             "acts if the game does not already use this key for that.");
+        _nextRecipeKey = ModKeys.Bind(config,
+            "Crafting", "NextRecipe", new KeyboardShortcut(KeyCode.C),
+            "At a workbench or furnace: jumps to the next learned recipe, in the order the station counts them, " +
+            "going round to the first after the last.");
+        _prevRecipeKey = ModKeys.Bind(config,
+            "Crafting", "PreviousRecipe", new KeyboardShortcut(KeyCode.C, KeyCode.LeftShift),
+            "The same, backwards.");
         _zoneKey = ModKeys.Bind(config,
             "Crafting", "SwitchToQueue", new KeyboardShortcut(KeyCode.F6),
             "At a workbench or furnace: jumps between the recipe list and the queue. Only acts if the " +
@@ -412,7 +427,7 @@ internal static class CraftReader
         try
         {
             var preview = item.GetComponentInParent<UICraftPreviewItemCell>();
-            if (preview != null) return WithTab(preview, DescribePreview(preview));
+            if (preview != null) return WithTab(preview, WithPosition(preview, DescribePreview(preview)));
 
             var queued = item.GetComponentInParent<UICraftQueueElementWidget>();
             if (queued != null) return DescribeQueueElement(queued);
@@ -489,6 +504,75 @@ internal static class CraftReader
         if (!data.CanStart) parts.Add(Loc.Get("craft.cannot_start"));
 
         return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// "..., 5 of 24": where a recipe sits among all the station's recipes, in the order the window
+    /// draws them. The window summary gives a count; without positions the player had to count
+    /// cells by ear, and the grid's arrows do not run through them in one line.
+    /// </summary>
+    private static string WithPosition(UICraftPreviewItemCell preview, string label)
+    {
+        if (string.IsNullOrEmpty(label) || LazyWindowsStackController.ActiveWindow is not UICraftWindow window) return label;
+        var cells = RecipeCells(window);
+        var index = cells.IndexOf(preview);
+        return index < 0 ? label : Loc.Fmt("craft.recipe_position", label, index + 1, cells.Count);
+    }
+
+    /// <summary>Every recipe cell of a workbench, group by group, in the order the window draws them.</summary>
+    private static List<UICraftPreviewItemCell> RecipeCells(UICraftWindow window)
+    {
+        var result = new List<UICraftPreviewItemCell>();
+        var tabs = G.DisplayedTabs(window);
+        if (tabs == null) return result;
+        foreach (var tab in tabs)
+        {
+            var cells = tab == null ? null : G.TabCells(tab);
+            if (cells == null) continue;
+            // Extension headers sit in the same list but are not recipes.
+            result.AddRange(cells.Where(cell => cell != null && G.PreviewData(cell)?.CraftDef != null));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// C / Shift+C at a workbench: the next (previous) learned recipe, going round at the ends. The grid's
+    /// own arrows stop at the end of each row, so this is the one way through all of them in a line.
+    /// </summary>
+    private static bool CycleRecipe(UICraftWindow window, int step)
+    {
+        // Unknown recipes all read the same and cannot be made, so C passes them by.
+        var cells = RecipeCells(window)
+            .Where(c => c.ItemCellGamepadNavigationItem != null && G.PreviewData(c)?.IsUnknown != true).ToList();
+        if (cells.Count == 0)
+        {
+            Say(Loc.Get("craft.no_known_recipes"));
+            return true;
+        }
+
+        var focused = UiNarrator.FocusedItem;
+        var at = focused == null ? -1 : cells.FindIndex(c => c.ItemCellGamepadNavigationItem == focused);
+        var target = at < 0
+            ? cells[step > 0 ? 0 : cells.Count - 1]
+            : cells[(at + step + cells.Count) % cells.Count];
+        var item = target.ItemCellGamepadNavigationItem;
+
+        // Only one recipe: focus stays put and says nothing, so read it here.
+        if (item == focused)
+        {
+            Say(DescribeWidget(item));
+            return true;
+        }
+
+        var controller = item.Controller ?? window.GetComponentInChildren<GamepadNavigationController>();
+        if (controller == null) return true;
+        // SetFocusedItem only knows items from the controller's last scan (see ChestSections).
+        if (!G.NavItems(controller).Contains(item)) controller.ReinitItems(focusOnFirstActive: false);
+        // Leaving the queue for the list: the game would otherwise keep treating keys as queue keys.
+        G.QueueSelected(window) = false;
+        ScreenReader.ClearMenuContext();
+        controller.SetFocusedItem(item);
+        return true;
     }
 
     /// <summary>Prefixes the recipe group's name when focus crosses into a new one on a station with several.</summary>
@@ -997,6 +1081,8 @@ internal static class CraftReader
             if (_startKey.Value.IsDown()) return TryStart(window);
             if (_queueKey.Value.IsDown() && window is UICraftSelectionWindow selection) return TryQueue(selection);
             if (_zoneKey.Value.IsDown() && window is UICraftWindow craft) return TrySwitchZone(craft);
+            if (_nextRecipeKey.Value.IsDown() && window is UICraftWindow next) return CycleRecipe(next, 1);
+            if (_prevRecipeKey.Value.IsDown() && window is UICraftWindow prev) return CycleRecipe(prev, -1);
         }
         catch (Exception ex)
         {

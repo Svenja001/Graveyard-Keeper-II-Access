@@ -47,7 +47,7 @@ internal static class AutoWalk
     private static readonly TakenControlType[] SceneControl =
     {
         TakenControlType.ByFlow, TakenControlType.ByCinematics, TakenControlType.ByTeleport,
-        TakenControlType.BySleep, TakenControlType.ByDeath,
+        TakenControlType.BySleep, TakenControlType.ByDeath, TakenControlType.BySceneLoading,
     };
 
     /// <summary>When the release key was first pressed, for the press-twice confirmation.</summary>
@@ -1189,6 +1189,7 @@ internal static class AutoWalk
         TakenControlType.ByTeleport => Loc.Get("control.by_teleport"),
         TakenControlType.BySleep => Loc.Get("control.by_sleep"),
         TakenControlType.ByDeath => Loc.Get("control.by_death"),
+        TakenControlType.BySceneLoading => Loc.Get("control.by_scene_loading"),
         _ => type.ToString(),
     };
 

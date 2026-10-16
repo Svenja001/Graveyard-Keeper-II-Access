@@ -86,10 +86,29 @@ internal static class ScreenReader
     /// </summary>
     internal static bool SupportsBraille => _prismAvailable && PrismWrapper.SupportsBraille;
 
+    /// <summary>Until this time (unscaled) no line may interrupt speech; see <see cref="SayProtected"/>.</summary>
+    private static float _protectedUntil;
+
+    /// <summary>
+    /// Says a line that nothing said right after it may cut off. A queued line is dropped by the
+    /// screen reader the moment the next interrupting line arrives, before it is ever spoken - so it
+    /// never shows up in the speech history either. An inspiration finishing while fishing was
+    /// talked over by the station's bait line in the same frame, and an achievement by the next
+    /// focus change (log of 2026-10-15). For a moment every interrupting line is queued instead.
+    /// </summary>
+    internal static bool SayProtected(string text, bool interrupt = false)
+    {
+        if (!Say(text, interrupt)) return false;
+        var hold = Mathf.Clamp(text.Length * 0.07f, 2f, 6f);
+        _protectedUntil = Mathf.Max(_protectedUntil, Time.unscaledTime + hold);
+        return true;
+    }
+
     internal static bool Say(string text, bool interrupt = true)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
 
+        if (interrupt && Time.unscaledTime < _protectedUntil) interrupt = false;
         LastSpokenAt = Time.unscaledTime;
 
         // Prism routes this to speech *and* braille in one call when the screen reader supports

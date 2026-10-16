@@ -56,6 +56,17 @@ internal static class UiNarrator
     /// </summary>
     internal static float QueueFocusUntil;
 
+    /// <summary>The frame an arrow key last asked focus to move - see <see cref="ArrowPressed"/>.</summary>
+    private static int _arrowFrame = -10;
+
+    /// <summary>
+    /// Called by <see cref="MenuKeys"/> before an arrow step. Neighbours often read the same -
+    /// unknown recipes, empty slots - and the duplicate filter in SayMenu, meant for a window
+    /// re-focusing the control it already had, swallowed every step after the first. The player
+    /// heard silence and lost count of what they had passed.
+    /// </summary>
+    internal static void ArrowPressed() => _arrowFrame = Time.frameCount;
+
     internal static void Init(ManualLogSource log)
     {
         _log = log;
@@ -128,6 +139,7 @@ internal static class UiNarrator
         {
             if (item == null) return;
             _silentWindow = null;
+            if (item != FocusedItem && Time.frameCount - _arrowFrame <= 1) ScreenReader.ClearMenuContext();
             FocusedItem = item;
             var label = DescribeItem(item);
 
@@ -172,6 +184,7 @@ internal static class UiNarrator
             _lastFocusLabel = null;
             FocusedItem = null;
             BodyWindowsReader.Reset();
+            ChestButtons.Reset();
             CraftReader.Reset();
             StationsReader.Reset();
             if (window is CharacterWindow) TreesReader.Reset();

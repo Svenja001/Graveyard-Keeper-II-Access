@@ -956,7 +956,10 @@ internal static class TreesReader
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         Plugin.Log?.LogInfo($"[Trees] \"{text}\"");
-        ScreenReader.Say(text);
+        // holdFocus lines are the "learned" results: protected, so the spent-points line or the
+        // next arrow press queues behind them instead of cutting them off.
+        if (holdFocus) ScreenReader.SayProtected(text, interrupt: true);
+        else ScreenReader.Say(text);
         if (holdFocus) UiNarrator.QueueFocusUntil = Time.unscaledTime + 1.5f;
     }
 
