@@ -173,6 +173,7 @@ internal static class InteriorNavmesh
         CopySettings(template, slot);
         LazySingleton<GlobalNavigationManager>.Instance.InitRecastGraph(
             (LazyConsts.Navigation.Graph)slot.graphIndex, center, zone.wholeZoneRect.size);
+        Reachability.ForgetNodeCounts();
 
         var dropped = DropFloorless(slot);
         var kept = new List<string>();
@@ -213,8 +214,8 @@ internal static class InteriorNavmesh
     {
         get
         {
-            if (_graph != null && _graph.CountNodes() > 0) yield return _graph;
-            if (_upper != null && _upper.CountNodes() > 0) yield return _upper;
+            if (Reachability.HasNodes(_graph)) yield return _graph;
+            if (Reachability.HasNodes(_upper)) yield return _upper;
         }
     }
 

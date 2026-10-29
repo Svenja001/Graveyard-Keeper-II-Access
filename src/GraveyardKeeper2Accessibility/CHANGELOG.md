@@ -1,3 +1,60 @@
+## 0.2.0
+
+* **Bugs can be reported to the developers.** The "Report a bug" window in the menu could be heard
+but not used: its categories and Send button only took mouse clicks. Now the arrow keys go through
+the title, the description, the categories, Send and Cancel, and Enter types into a field or
+presses a button. Escape while typing leaves the field and reads back what you wrote, instead of
+closing the window and losing the report.
+* **A zombie's perks are read out.** Each perk says its name, whether the zombie has learned it,
+what it costs against the zombie's points, what it needs first, and what it does; the page says
+which perks the zombie has and how many it can learn now. **C / Shift+C** jump to the next perk it
+can learn, **Ctrl+Left / Ctrl+Right** switch talent, **Ctrl+Up / Ctrl+Down** switch page, and
+learning a perk with **Enter** is announced. Talents in the zombie's summary are named instead of
+"talent\_orange".
+* **The zombie choir** is named, says how many zombies are singing and how many places are free,
+and says when a zombie goes in or comes out (**F** takes one out).
+* **Zombies in the object list say what they have equipped:** their name, tool with its mastery
+bonus, weapon, armour and collar, empty slots included.
+* **Autopsy, embalming and resurrection tables in the object list say what is on them:** "empty",
+the body with its skulls, or the zombie by name with its skulls. Pallets (the morgue's corpse
+pallets and the warehouse's crate pallets) say the same, or what crates are on them.
+* **Town building places in the object list name every building that can go there** and say
+whether you can build it now or which materials are missing.
+* **Factory chests in the object list say what is in them**, most first, or "empty", so the
+outputs can be collected without walking to every chest.
+* **A factory chest's side slots say their side and what they do:** "east: out, sends clay", "out,
+nothing chosen yet", "in" or "no belt". Enter on an out side says which side you are choosing for,
+and choosing an item in the chest says what that side now sends.
+* **G in the factory says where each workbench stands**, in movement-key steps like the conveyor
+lines, so two benches of the same kind can be told apart.
+* **Factory workbenches in the object list say who works them:** "zombie" and its name, or "no
+zombie at it", so cycling through the benches finds the ones still waiting for a zombie.
+* **"Mastery too low" says what is needed and what the worker has:** "needs Building 6, zombie has
+0" for a zombie, "you have" for you.
+* **Conveyor belts with something lying on them are in the object list** under conveyors ("belt
+with Wood Kit"), so you can walk there and take it off with **E**. Empty belts stay out.
+* **A workbench stuck with a finished item says why and where to free it:** what is waiting to go
+out, and where the belt at its output is and what lies on it. A started order cannot be cancelled
+in the game; emptying that belt lets the bench finish and take new orders.
+* **Shift+G lines say what is lying on them**, and "full" when every belt piece of the line holds
+something, which is how a backed-up line shows.
+* **Factory workbenches in the object list say how they are linked:** where their belts come from
+and lead to, followed to the chest or bench at the other end ("takes from chest at 4 west, which
+sends clay, sends to forge at 3 east"), or "a dead end" and "a belt nothing feeds". A chest that
+feeds a bench says which item it sends down that belt, so you know what to put in it.
+* **Remove mode in the factory says what each piece is joined to:** a belt says which way it runs,
+where its items come from and where they go, followed to the chest or bench at each end, whether it
+is a dead end and what it points at, and what lies on it. **Ctrl+Space** (Ctrl+Shift+Space back)
+jumps straight to the next broken belt piece, so dead ends can be found and torn down.
+* **Free spots found with End now say what a belt piece would join there**, like the arrow keys and
+Home already did.
+* **In the factory, End offers spots that join what already stands first:** every cell next to a
+standing piece is tried, and the free ones where the piece would join something come first, the
+most links first, so a belt that closes a gap at both ends is the first spot. R turns the piece,
+and the next End searches again for the new direction.
+* **The object list is fast again in the town guard barracks**, and in other rooms without a
+navmesh of their own.
+
 ## 0.1.2
 
 * **Chests: "move all identical items to the chest" can be reached.** Up arrow from the top row
@@ -135,7 +192,7 @@ happiness from selling what the trader likes. F accepts the deal.
 * **Crafting stations** — workbenches, furnaces, the alchemy table, the study table, garden beds,
 fuel stores — are read in full: recipes, ingredients against what you hold, energy, time, mastery,
 the queue. F makes it, Space queues it, the queue can be reordered.
-* **The recipe book (Foliant)** can be paged and is read.
+* **The recipe book (Folio)** can be paged and is read.
 * **Holding F where nothing happens** says why: you carry several things overhead, every work spot
 is blocked, a tool is missing or worn out, a worker is busy, no job in the queue can start, or
 energy, insanity or mastery fall short. If the game gives none of these reasons, the mod says

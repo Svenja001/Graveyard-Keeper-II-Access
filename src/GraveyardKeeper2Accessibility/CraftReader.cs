@@ -626,7 +626,7 @@ internal static class CraftReader
         };
 
         if (element.CraftStatus != CraftStatus.OK && element.CraftStatus != CraftStatus.Other)
-            parts.Add(StatusText(element.CraftStatus));
+            parts.Add(StatusText(element, data.WgoData));
 
         return string.Join(", ", parts);
     }
@@ -1432,6 +1432,34 @@ internal static class CraftReader
 
     internal static string StatusText(CraftStatus status) =>
         Loc.Find("craft.status." + status) ?? Navigator.Humanise(status.ToString());
+
+    /// <summary>
+    /// A queued order's status, and for "mastery too low" what it needs against what the worker has:
+    /// "mastery too low, needs Building 6, zombie has 0" (user, 2026-10-25). The numbers are the ones
+    /// <c>ZombieWgoData.CheckWorkerDependentValues</c> compares; star and autopsy crafts only need 1.
+    /// </summary>
+    internal static string StatusText(CraftElementBase element, WgoData wgo)
+    {
+        var status = element.CraftStatus;
+        var text = StatusText(status);
+        if (status != CraftStatus.NotEnoughMastery) return text;
+        try
+        {
+            var p = element.ParamsData;
+            var talent = p?.TalentDef?.id;
+            if (talent == null) return text;
+            var common = p.craftParamsType == CraftParamsData.CraftParamsType.Common
+                && element.Def != null && !element.Def.isStarCraft && !element.Def.isAutopsyCraft;
+            var need = common ? p.MasteryLock : 1;
+            var zombie = wgo?.Worker is ZombieWgoData;
+            return $"{text}, {Loc.Fmt(zombie ? "craft.mastery_detail_zombie" : "craft.mastery_detail", TalentName(talent), need, p.MasteryValue)}";
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log?.LogWarning($"[Craft] Could not read the mastery an order needs: {ex.Message}");
+            return text;
+        }
+    }
 
     private static string Runes(Vector3Int runes) => Loc.Fmt("craft.runes", runes.x, runes.y, runes.z);
 

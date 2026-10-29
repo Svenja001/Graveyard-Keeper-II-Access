@@ -311,12 +311,21 @@ internal static class Navigator
         if (!TryGetPlayer(out _, out var facing)) return null;
 
         var status = ObjectStatus.Of(target.Data);
-        var name = status == null ? target.Name : $"{target.Name}, {status}";
+        var baseName = ObjectStatus.ZombieName(target.Data) ?? target.Name;
+        var name = status == null ? baseName : $"{baseName}, {status}";
+        var worker = FactoryReader.Worker(target.Data);
+        if (worker != null) name = $"{name}, {worker}";
 
-        return Loc.Fmt("nav.selection",
-            Describe(name, target.Position, from, facing),
-            _objectIndex + 1,
-            Objects.Count);
+        // A zombie: its name, where it is, then its gear - the distance first so cycling stays quick.
+        var where = Describe(name, target.Position, from, facing);
+        var gear = ObjectStatus.ZombieGear(target.Data);
+        if (gear != null) where = $"{where}, {gear}";
+
+        // A factory bench: what its belts come from and lead to, to tell the many of a kind apart.
+        var links = FactoryReader.BenchLinks(target.Data);
+        if (links != null) where = $"{where}, {links}";
+
+        return Loc.Fmt("nav.selection", where, _objectIndex + 1, Objects.Count);
     }
 
     /// <summary>The currently selected object, or an invalid target when there is none.</summary>
@@ -440,8 +449,17 @@ internal static class Navigator
             var type = data.Definition.interactionType;
             if (type == WGODef.InteractionType.None && !HasRealName(data.id) && !IsExtension(data.id)) continue;
 
-            // A factory has belt pieces by the hundred; Shift+G reads them as lines instead.
-            if (FactoryReader.IsBeltPiece(data)) continue;
+            // A factory has belt pieces by the hundred; Shift+G reads them as lines instead. One
+            // with something lying on it is listed, though: E takes it off, and that is how a bench
+            // stuck with a full output belt gets going again (user, 2026-10-24).
+            if (FactoryReader.IsBeltPiece(data))
+            {
+                var load = data.Definition.conveyorType == ConveyorElementType.Cell ? FactoryReader.BeltLoad(data) : null;
+                if (load != null)
+                    AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, CategoryOf(data.id, data.Definition),
+                        Loc.Fmt("factory.belt_holds", ObjectNames.Of(data.id), load), data));
+                continue;
+            }
 
             AllTargets.Add(new NavTarget(data.id, data.Position, data.WorldId, CategoryOf(data.id, data.Definition), data: data));
 

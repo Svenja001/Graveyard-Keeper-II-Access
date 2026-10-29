@@ -333,7 +333,8 @@ internal static class UiNarrator
         QuestPageReader.SpeaksForItself(window) || VendorReader.SpeaksForItself(window) ||
         BindingsReader.SpeaksForItself(window) || SurveyResultReader.SpeaksForItself(window) ||
         MilitaryReader.SpeaksForItself(window) || HotBarReader.SpeaksForItself(window) ||
-        ItemMenuReader.SpeaksForItself(window) || TravelMapReader.SpeaksForItself(window);
+        ItemMenuReader.SpeaksForItself(window) || TravelMapReader.SpeaksForItself(window) ||
+        BugReportReader.SpeaksForItself(window);
 
     private static string WindowName(LazyWidgetBase window)
     {
@@ -446,6 +447,10 @@ internal static class UiNarrator
 
         // The hotbar slot window is read and driven by HotBarReader.
         if (HotBarReader.SilencesCell(cell)) return "";
+
+        // A factory chest's side slots say their side and whether they send something out.
+        var side = ConveyorSlotReader.DescribeCell(cell);
+        if (side != null) return side;
 
         var displaying = cell.DisplayingItem;
 

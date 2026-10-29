@@ -90,6 +90,9 @@ internal static class WorldAnnouncer
             var extension = ObjectStatus.Extension(wgo.Data);
             if (extension != null) line = $"{line}, {extension}";
 
+            var choir = ObjectStatus.Choir(wgo.Data);
+            if (choir != null) line = $"{line}, {choir}";
+
             // A story step here that will not count yet - see StoryListeners.MissingFor.
             var missing = StoryListeners.MissingFor(wgo.Data.id);
             if (missing != null)
@@ -103,6 +106,84 @@ internal static class WorldAnnouncer
         catch (Exception ex)
         {
             _log?.LogError($"[World] Interaction announce failed for '{(wgo == null || wgo.Data == null ? "?" : wgo.Data.id)}': {ex}");
+        }
+    }
+
+    // ---- the zombie choir -------------------------------------------------------------------
+    //
+    // E puts the carried zombie in, F takes one out. Both said with the count afterwards: the zombies
+    // are items in the choir's inventory, so on screen nothing else changes.
+
+    private static readonly AccessTools.FieldRef<WGOInteractionHandlerBase, Wgo> HandlerWgo =
+        AccessTools.FieldRefAccess<WGOInteractionHandlerBase, Wgo>("assignedWgo");
+
+    [HarmonyPatch(typeof(ChoirPlaceInteractionHandler), nameof(ChoirPlaceInteractionHandler.Interact), typeof(PlayerController))]
+    [HarmonyPrefix]
+    private static void Choir_Interact_Prefix(ChoirPlaceInteractionHandler __instance, out int __state) =>
+        __state = ChoirCount(__instance);
+
+    [HarmonyPatch(typeof(ChoirPlaceInteractionHandler), nameof(ChoirPlaceInteractionHandler.Interact), typeof(PlayerController))]
+    [HarmonyPostfix]
+    private static void Choir_Interact(ChoirPlaceInteractionHandler __instance, int __state)
+    {
+        try
+        {
+            var data = HandlerWgo(__instance)?.Data;
+            var now = ChoirCount(__instance);
+            if (data == null || now < 0) return;
+
+            if (now <= __state) return;
+            var line = Loc.Fmt("world.choir_put", ObjectStatus.Choir(data));
+            _log?.LogInfo($"[World] Choir: {line}");
+            ScreenReader.Say(line, interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[World] Choir announce failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    [HarmonyPatch(typeof(ChoirPlaceInteractionHandler), nameof(ChoirPlaceInteractionHandler.Interact2), typeof(PlayerController))]
+    [HarmonyPrefix]
+    private static void Choir_Interact2_Prefix(ChoirPlaceInteractionHandler __instance, out int __state) =>
+        __state = ChoirCount(__instance);
+
+    [HarmonyPatch(typeof(ChoirPlaceInteractionHandler), nameof(ChoirPlaceInteractionHandler.Interact2), typeof(PlayerController))]
+    [HarmonyPostfix]
+    private static void Choir_Interact2(ChoirPlaceInteractionHandler __instance, int __state)
+    {
+        try
+        {
+            var data = HandlerWgo(__instance)?.Data;
+            var now = ChoirCount(__instance);
+            if (data == null || now < 0) return;
+
+            // The game takes one only when the player has a free place overhead, and says nothing when not.
+            var line = now < __state
+                ? Loc.Fmt("world.choir_taken", ObjectStatus.Choir(data))
+                : __state > 0 ? Loc.Get("world.choir_hands_full") : null;
+            if (line == null) return;
+
+            _log?.LogInfo($"[World] Choir: {line}");
+            ScreenReader.Say(line);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[World] Choir announce failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Zombies in the choir behind this handler, or -1 when it cannot be read.</summary>
+    private static int ChoirCount(ChoirPlaceInteractionHandler handler)
+    {
+        try
+        {
+            var inventory = HandlerWgo(handler)?.Data?.Inventory;
+            return inventory == null ? -1 : inventory.GetItemsByGroupId("zombie").Count;
+        }
+        catch
+        {
+            return -1;
         }
     }
 

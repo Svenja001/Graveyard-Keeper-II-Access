@@ -46,6 +46,7 @@ public class Plugin : BaseUnityPlugin
         FightAnnouncer.Init(Log, Config);
         MilitaryReader.Init(Log, Config);
         TravelMapReader.Init(Log);
+        BugReportReader.Init(Log);
         CombatAim.Init(Config);
         WorkSpotCheck.Init(Log);
         BodyWindowsReader.Init(Config);
@@ -53,6 +54,7 @@ public class Plugin : BaseUnityPlugin
         StationsReader.Init(Config);
         TreesReader.Init(Config);
         ItemCountReader.Init();
+        ConveyorSlotReader.Init();
         BindingsReader.Init();
         QuestPageReader.Init();
         SurveyResultReader.Init();
@@ -138,6 +140,11 @@ public class Plugin : BaseUnityPlugin
                 new Harmony(PluginInfo.Guid + ".count").PatchAll(typeof(ItemCountReader));
                 Log.LogInfo("Patched the quantity window.");
             }
+            if (ConveyorSlotReader.Ready)
+            {
+                new Harmony(PluginInfo.Guid + ".chestsides").PatchAll(typeof(ConveyorSlotReader));
+                Log.LogInfo("Patched the factory chest sides.");
+            }
             if (BindingsReader.Ready)
             {
                 new Harmony(PluginInfo.Guid + ".bindings").PatchAll(typeof(BindingsReader));
@@ -210,6 +217,18 @@ public class Plugin : BaseUnityPlugin
         }
         try
         {
+            if (BugReportReader.Ready)
+            {
+                new Harmony(PluginInfo.Guid + ".bugreport").PatchAll(typeof(BugReportReader));
+                Log.LogInfo("Patched the bug report window.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Patching the bug report window failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        try
+        {
             new Harmony(PluginInfo.Guid + ".aim").PatchAll(typeof(CombatAim));
             Log.LogInfo("Patched melee attacks to aim at the nearest enemy.");
         }
@@ -255,6 +274,10 @@ public class Plugin : BaseUnityPlugin
 
             // The controls screen reads its own keys - all of them while waiting for a new one.
             if (BindingsReader.Update()) return;
+
+            // The bug report window claims every key while open, so letters typed into it do not
+            // also fire the mod's own keys.
+            if (BugReportReader.Ready && BugReportReader.Update(_repeatKey.Value.IsDown())) return;
 
             if (MilitaryReader.UpdateKeys()) return;
 

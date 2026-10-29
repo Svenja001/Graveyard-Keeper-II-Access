@@ -177,6 +177,13 @@ to, then the first one. Only stones you have already unlocked are offered. Up / 
 Home and End jump to the first and last, and a letter jumps to the next place starting with it.
 **Enter** travels there, **Escape** closes the map without travelling, F8 repeats the current place.
 
+**Report a bug** (in the menu): opens with the cursor already in the title field, so you can type
+straight away. **Tab** switches between the title and the description, **Escape** stops typing and
+reads back what you wrote (it no longer closes the window or throws the text away). After that the
+arrow keys go through title, description, the categories, Send and Cancel; **Enter** puts the cursor
+back in a field, picks a category or presses the button. F8 reads the field you are in. If Send
+refuses (no title), you hear why; after sending, the game's "sending" and "thank you" boxes are read.
+
 **Hotbar slot window** ("put on the hotbar" in an item's menu, Shift+F10): says the item and what the
 four slots hold. Arrows choose a slot, **Enter** or **1 – 4** puts the item there, **Escape** leaves
 the hotbar unchanged.
@@ -259,9 +266,21 @@ Each is read out when it opens; **F8** reads it again.
   afterwards is read out (faith, money, bonus, blessing); **Enter** closes it.
 - **Porter station:** what it carries. **Enter** on an item switches it on or off, and says which.
 - **A zombie's window:** name, skulls, mastery in each talent, points, perks, and the page you are
-  on. **Ctrl+Left / Ctrl+Right** switch between its character page and perks page; **Space** takes an
-  item out of its organs, pockets or equipment.
-- **Recipe book (Foliant):** says which page is open and how many entries it has. **Left / Right**
+  on. **Ctrl+Up / Ctrl+Down** switch between its character page and perks page (on the character
+  page **Ctrl+Left / Ctrl+Right** do too); **Space** takes an item out of its organs, pockets or
+  equipment. A zombie holds one perk per red skull, and pays for perks with its own points.
+- **Zombie choir (in the church):** says how many zombies are singing and how many places are free.
+  **E** puts the zombie you carry in; **F** takes one out and puts it on your head.
+- **Zombies in the object list** say their name and what they have equipped - tool (with the mastery
+  it adds), weapon, armour and collar, empty slots included - so cycling through them shows which
+  ones need better gear.
+- **A zombie's perks page:** works like the tech tree. The page says the talent, its mastery, how many
+  perks there are, which the zombie has learned and how many it can learn now. Each perk says its
+  name, whether it is learned (or inactive for lack of red skulls), its price against the zombie's
+  points, which perks it needs first, whether a perk slot is free, and what it does. **C / Shift+C**
+  jump to the next / previous perk it can learn, across all talents; **Ctrl+Left / Ctrl+Right**
+  switch talent; **Enter** learns the perk and says so.
+- **Recipe book (Folio):** says which page is open and how many entries it has. **Left / Right**
   (or **Ctrl+Left / Ctrl+Right**) turn the page: simple, medium, hard, epic and heroic recipes, then
   the ingredients that give red, green and blue runes. Each recipe says the runes it needs
   ("needs 1 red, 1 green") and what the potion does; each ingredient says the runes it gives.
@@ -293,7 +312,7 @@ map. The page is named when it comes up; **F8** says the page summary again.
 | **Ctrl+Left / Ctrl+Right** | On the tech tree: previous / next branch (building, metallurgy, …). On the inspiration page: previous / next talent. |
 | **Arrow keys** | Move around the tree. The tree is laid out left to right, so Right usually goes to what comes next. |
 | **Enter** | On a technology: open it. In the opened technology: unlock it. On an inspiration or a perk: buy it. |
-| **C / Shift+C** | On the inspiration page: jump to the next / previous thing you can buy right now — a finished inspiration you have the faith for, or a perk you have the talent points for, across all your talents (this talent first; switches talent when needed). On the tech tree: jump to the next / previous technology your points can learn, across all open branches (this branch first; switches branch when needed). Says so when there is nothing. |
+| **C / Shift+C** | On the inspiration page: jump to the next / previous thing you can buy right now — a finished inspiration you have the faith for, or a perk you have the talent points for, across all your talents (this talent first; switches talent when needed). On the tech tree: jump to the next / previous technology your points can learn, across all open branches (this branch first; switches branch when needed). In a zombie's window: jump to the next / previous perk the zombie can learn, across its talents. Says so when there is nothing, and why. |
 
 **Tech tree.** Each branch starts with how many technologies it has, how many you have learned, how
 many you could learn right now, and your red, green and blue points. Each technology says whether
@@ -344,7 +363,9 @@ list; the lines cover them.
 
 **Remove mode ("Remove" in the building menu):** Space, End or Page down goes to the next building
 that can be removed here, nearest first (Shift+Space or Page up goes back); Home says the selected
-one; Enter removes it. Most buildings are not removed at once but *marked for demolition*: leave
+one; Enter removes it. In the factory, **Ctrl+Space** goes to the next broken belt piece (a dead
+end, or one nothing feeds; Ctrl+Shift+Space goes back), and every factory piece says what it is
+joined to: which way a belt runs, where its items come from and go to, and what lies on it. Most buildings are not removed at once but *marked for demolition*: leave
 remove mode, walk to it (the object list says "marked for demolition") and knock it down with F. Enter
 on a marked building takes the mark back off.
 

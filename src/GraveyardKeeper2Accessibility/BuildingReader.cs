@@ -323,7 +323,9 @@ internal static class BuildingReader
     private static void UpdateRemove()
     {
         var back = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-        if (Input.GetKeyDown(KeyCode.End) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.PageDown))
+        var ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        if (ctrl && Input.GetKeyDown(KeyCode.Space)) StepBrokenBelt(back ? -1 : 1);
+        else if (Input.GetKeyDown(KeyCode.End) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.PageDown))
             StepRemovable(back ? -1 : 1);
         else if (Input.GetKeyDown(KeyCode.PageUp)) StepRemovable(-1);
         else if (Input.GetKeyDown(KeyCode.Home) || Input.GetKeyDown(KeyCode.F8)) SayRemoveSelection(interrupt: true);
@@ -378,6 +380,47 @@ internal static class BuildingReader
         if (!PointAt(target))
             Log?.LogWarning($"[Build] Remove cursor did not land on '{target.Data.id}'.");
         SayRemoveSelection(interrupt: true);
+    }
+
+    /// <summary>
+    /// Ctrl+Space: the next belt piece that is a dead end or that nothing feeds, in the same
+    /// nearest-first order as Space - among hundreds of belts these are the ones to tear down.
+    /// </summary>
+    private static void StepBrokenBelt(int delta)
+    {
+        if (_removables == null)
+        {
+            _removables = Removables();
+            _removableIndex = -1;
+        }
+        _removables.RemoveAll(w => w == null || w.Data == null);
+
+        var broken = new HashSet<WgoData>();
+        try
+        {
+            foreach (var scene in _removables.Select(w => w.Data.WorldId).Distinct())
+                broken.UnionWith(FactoryReader.BrokenBelts(scene));
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not find the broken belts: {ex.Message}");
+        }
+
+        var count = _removables.Count;
+        for (var step = 1; step <= count; step++)
+        {
+            var start = _removableIndex < 0 ? (delta > 0 ? -1 : 0) : _removableIndex;
+            var index = ((start + delta * step) % count + count) % count;
+            if (!broken.Contains(_removables[index].Data)) continue;
+
+            _removableIndex = index;
+            var target = _removables[index];
+            if (!PointAt(target))
+                Log?.LogWarning($"[Build] Remove cursor did not land on '{target.Data.id}'.");
+            SayRemoveSelection(interrupt: true);
+            return;
+        }
+        ScreenReader.Say(Loc.Get("build.remove_no_broken"));
     }
 
     /// <summary>
@@ -473,6 +516,10 @@ internal static class BuildingReader
             var flat = new Vector2(offset.x, offset.z);
             parts.Add(Loc.Fmt("build.remove_where", Mathf.RoundToInt(flat.magnitude), Navigator.KeyDirections(flat)));
         }
+
+        // A factory piece: what it is joined to, after where it is so stepping stays quick.
+        var links = FactoryReader.PieceLinks(wgo.Data);
+        if (links != null) parts.Add(links);
         parts.Add(Loc.Get(marked ? "build.remove_key_unmark" : "build.remove_key"));
         ScreenReader.Say(string.Join(", ", parts), interrupt);
     }
@@ -774,9 +821,7 @@ internal static class BuildingReader
     private static List<string> SlotOccupants(BuildArea slot, Wgo owner, Wgo target, BuildingDef def)
     {
         var names = new List<string>();
-        var slotCol = slot.Collider != null ? slot.Collider : slot.GetComponent<Collider>();
-        if (slotCol == null) return names;
-        var b = slotCol.bounds;
+        if (!(SlotBounds(slot) is Bounds b)) return names;
         var half = Vector3.Max(Vector3.zero, b.extents - VisualConsts.XYZ_STEP);
         var hits = new Collider[20];
         var count = Physics.OverlapBoxNonAlloc(b.center, half, hits, Quaternion.identity, 590080);
@@ -800,6 +845,25 @@ internal static class BuildingReader
             if (name != null && !names.Contains(name)) names.Add(name);
         }
         return names;
+    }
+
+    /// <summary>
+    /// Where a slot is now, from its transform. <c>Collider.bounds</c> is the physics engine's copy,
+    /// moved only at the next physics sync: on the ghost of a workbench being placed it still stood
+    /// where the pointer was one move before, so a Schmelzofen II went up with an iron anvil in its
+    /// bellows slot while the mod said the slot was free (user, 2026-10-17).
+    /// </summary>
+    private static Bounds? SlotBounds(BuildArea slot)
+    {
+        var col = slot.Collider != null ? slot.Collider : slot.GetComponent<Collider>();
+        if (col == null) return null;
+        if (!(col is BoxCollider box)) return col.bounds;
+        var t = box.transform;
+        var bounds = new Bounds(t.TransformPoint(box.center), Vector3.zero);
+        var e = box.size * 0.5f;
+        for (var i = 0; i < 8; i++)
+            bounds.Encapsulate(t.TransformPoint(box.center + new Vector3((i & 1) == 0 ? -e.x : e.x, (i & 2) == 0 ? -e.y : e.y, (i & 4) == 0 ? -e.z : e.z)));
+        return bounds;
     }
 
     /// <summary>
@@ -849,11 +913,9 @@ internal static class BuildingReader
         foreach (var slot in slots)
         {
             var reasons = SlotOccupants(slot, target, target, null);
-            var col = slot.Collider != null ? slot.Collider : slot.GetComponent<Collider>();
-            if (col != null && zone != null && zone.ZoneCollider != null)
+            if (SlotBounds(slot) is Bounds b && zone != null && zone.ZoneCollider != null)
             {
                 var zb = zone.ZoneCollider.bounds;
-                var b = col.bounds;
                 if (!zb.Contains(new Vector3(b.min.x, zb.center.y, b.min.z)) || !zb.Contains(new Vector3(b.max.x, zb.center.y, b.max.z)))
                     reasons.Add(Loc.Get("build.blocker_outside"));
             }
@@ -1152,7 +1214,9 @@ internal static class BuildingReader
         var cursor = CurPos(_controller);
         var where = player == null ? "" : Navigator.KeyDirections(new Vector2(cursor.x - player.MovablePosition.x, cursor.z - player.MovablePosition.z));
         var state = StateText();
-        var link = LinkText() ?? AddOnRoomText();
+        // The same as the arrow keys and Home say: a belt rebuilt on a free spot said nothing about
+        // what it would join (user, 2026-10-24).
+        var link = FactoryReader.Placement(PointerWgo()) ?? LinkText() ?? AddOnRoomText();
         if (link != null) state = $"{state}, {link}";
         var line = Loc.Fmt("build.spot", _spotIndex + 1, _spots.Count, state, where);
         if (_spotsCompromised && _spotIndex == 0) line = $"{Loc.Get("build.addon_compromise")} {line}";
@@ -1328,6 +1392,7 @@ internal static class BuildingReader
         }
 
         var joining = JoiningSpots(start, playerPos);
+        var linking = IsConveyorBuild(CurrentBuild(_controller)) ? FactoryLinkSpots(start, playerPos) : new List<Vector3>();
 
         var marked = def != null && !string.IsNullOrEmpty(def.customBuildAreaId) && zone != null && zone.ZoneCollider != null;
         var reserved = ReservedBands();
@@ -1365,6 +1430,15 @@ internal static class BuildingReader
         if (result.Count == 0 && fallback.Count == 0 && def != null && !string.IsNullOrEmpty(def.customBuildAreaId))
             _coverHint = Loc.Get("build.cover_turn");
 
+        // A factory piece: spots where it would join what already stands come first, the most
+        // links first (user, 2026-10-24: "should always first offer spots that can link").
+        if (linking.Count > 0)
+        {
+            _spotsCompromised = false;
+            _coverHint = null;
+            return linking.Concat(result.Where(r => !linking.Exists(l => Flat(l - r).sqrMagnitude < 0.1f))).ToList();
+        }
+
         if (result.Count == 0 && fallback.Count > 0 && joining.Count == 0)
         {
             _spotsCompromised = true;
@@ -1381,6 +1455,42 @@ internal static class BuildingReader
         if (joining.Count > 0)
             result = joining.Concat(result.Where(r => !joining.Exists(j => Flat(j - r).sqrMagnitude < 1f))).ToList();
         return result;
+    }
+
+    /// <summary>
+    /// Green spots where the factory piece on the pointer, turned as it is now, would join a piece
+    /// already standing: most links first (a belt closing a gap joins both ends), then nearest the
+    /// player. R turns the piece and the next End searches again for the new way round.
+    /// </summary>
+    private static List<Vector3> FactoryLinkSpots(Vector3 start, Vector3 playerPos)
+    {
+        var found = new List<(Vector3 At, int Links)>();
+        if (!FactoryReader.InFactory()) return new List<Vector3>();
+
+        var grid = GridStep(_controller);
+        var cellX = Mathf.Max(0.05f, 0.02f * grid.x);
+        var cellZ = Mathf.Max(0.05f, 0.025f * grid.y);
+        var candidates = FactoryReader.LinkCandidates(cellX, cellZ);
+        candidates.Sort((a, b) => Flat(a - playerPos).sqrMagnitude.CompareTo(Flat(b - playerPos).sqrMagnitude));
+
+        var tried = 0;
+        foreach (var c in candidates)
+        {
+            if (++tried > 2500) break;
+            if (!MoveTo(new Vector3(c.x, start.y, c.z))) continue;
+            var links = FactoryReader.LinkCount(PointerWgo());
+            if (links == 0) continue;
+            var at = CursorGround();
+            if (found.Exists(s => Flat(s.At - at).sqrMagnitude < 0.01f)) continue;
+            found.Add((at, links));
+        }
+        MoveTo(start);
+
+        var best = found.Count == 0 ? 0 : found.Max(f => f.Links);
+        Log?.LogInfo($"[Build] Factory: {candidates.Count} cell(s) next to standing pieces, {tried} tried, {found.Count} free spot(s) that join something (best {best} link(s)).");
+        return found.OrderByDescending(f => f.Links)
+            .ThenBy(f => Flat(f.At - playerPos).sqrMagnitude)
+            .Select(f => f.At).ToList();
     }
 
     /// <summary>
@@ -1749,6 +1859,9 @@ internal static class BuildingReader
 
         var pointer = Pointer(_controller);
         var name = BuildingName(CurrentBuild(_controller));
+        var slotState = PlacingSlotBlockers();
+        if (slotState != null)
+            Log?.LogInfo($"[Build] Add-on slots at the spot: {(slotState.Count == 0 ? "free" : "blocked by " + string.Join(", ", slotState))}.");
         FactoryReader.BeginBuild();
         if (!pointer.TryBuildActionInput())
         {

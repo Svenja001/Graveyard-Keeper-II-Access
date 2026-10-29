@@ -44,6 +44,26 @@ internal static class ObjectStatus
 
         try
         {
+            var choir = Choir(data);
+            if (choir != null) parts.Add(choir);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Status] Could not read the choir of '{data.id}': {ex.Message}");
+        }
+
+        try
+        {
+            var table = Table(data) ?? Pallet(data) ?? TownPlace(data);
+            if (table != null) parts.Add(table);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Status] Could not read the body on '{data.id}': {ex.Message}");
+        }
+
+        try
+        {
             var extension = Extension(data);
             if (extension != null) parts.Add(extension);
         }
@@ -78,6 +98,16 @@ internal static class ObjectStatus
 
         try
         {
+            var contents = FactoryChest(data);
+            if (contents != null) parts.Add(contents);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Status] Could not read the contents of '{data.id}': {ex.Message}");
+        }
+
+        try
+        {
             var stock = Stock(data);
             if (stock != null) parts.Add(stock);
         }
@@ -97,6 +127,216 @@ internal static class ObjectStatus
         }
 
         return parts.Count == 0 ? null : string.Join(", ", parts);
+    }
+
+    /// <summary>"Urnen-Uli" - a zombie's own name, said in the list instead of "zombie". Null for anything else.</summary>
+    internal static string ZombieName(WgoData data)
+    {
+        try
+        {
+            if (!(data is ZombieWgoData zombie) || string.IsNullOrEmpty(zombie.Name)) return null;
+            var name = TmpText.Clean(LLBase.L(zombie.Name));
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Status] Could not read the name of zombie '{data?.id}': {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// "tool: iron pickaxe, Building +2, weapon: empty, armour: iron armour, collar: bronze collar" -
+    /// what a zombie has equipped, so cycling through the zombies in the list shows which ones are
+    /// worth new gear without opening each window. All four slots always, empty ones too: an empty
+    /// weapon slot is exactly what that comparison looks for. Said after the distance (user,
+    /// 2026-10-19: name, distance, then the gear).
+    /// </summary>
+    internal static string ZombieGear(WgoData data)
+    {
+        try
+        {
+            if (!(data is ZombieWgoData zombie) || zombie.ZombieItem == null) return null;
+            return string.Join(", ", new[]
+            {
+                Slot("zombieslot.tool", SafeItem(() => zombie.Hand), withBonus: true),
+                Slot("zombieslot.weapon", SafeItem(() => zombie.Weapon), withBonus: false),
+                Slot("zombieslot.armor", SafeItem(() => zombie.Armor), withBonus: false),
+                Slot("zombieslot.collar", SafeItem(() => zombie.Collar), withBonus: false),
+            });
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Status] Could not read the equipment of zombie '{data?.id}': {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string Slot(string key, Item item, bool withBonus)
+    {
+        var slot = Loc.Get(key);
+        if (item == null || item.IsEmpty || string.IsNullOrEmpty(item.id) || item.id == "empty")
+            return Loc.Fmt("status.zombie_slot_empty", slot);
+        var bonus = withBonus && item.Definition != null ? ToolSlotReader.Bonus(item.Definition) : null;
+        return bonus == null
+            ? Loc.Fmt("status.zombie_slot", slot, ItemText.Name(item.id))
+            : Loc.Fmt("status.zombie_slot_bonus", slot, ItemText.Name(item.id), bonus);
+    }
+
+    /// <summary>The equipment getters look the item up by a GUID that can be empty or stale; treat any failure as an empty slot.</summary>
+    private static Item SafeItem(Func<Item> get)
+    {
+        try
+        {
+            return get();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// "2 zombies singing, 3 places free" for the church's zombie choir. The zombies are items in
+    /// its inventory, not objects in the world, so nothing else says they are there - or that F
+    /// takes one back out.
+    /// </summary>
+    internal static string Choir(WgoData data)
+    {
+        if (data?.Definition == null || data.Definition.interactionType != WGODef.InteractionType.ChoirPlace) return null;
+        var inventory = data.Inventory;
+        if (inventory?.Data == null) return null;
+        var zombies = inventory.GetItemsByGroupId("zombie").Count;
+        var free = Math.Max(0, inventory.Data.InventorySize - inventory.Data.InventoryFillSize);
+        return Loc.Fmt("status.choir", zombies, free);
+    }
+
+    /// <summary>
+    /// "empty", "Body: 3 white skulls, 1 red skulls" or "zombie Urnen-Uli, Body: ..." for the
+    /// autopsy, embalming and resurrection tables (user, 2026-10-21: cycling the morgue's tables
+    /// should say which hold a corpse or a zombie before walking to each one). The body is an item
+    /// in the table's inventory, found the way <c>UIAutopsyWindowData</c> finds it; skulls summed
+    /// the way <c>UICorpseWidgetData</c> does.
+    /// </summary>
+    internal static string Table(WgoData data)
+    {
+        var type = data?.Definition?.interactionType;
+        if (type != WGODef.InteractionType.Autopsy && type != WGODef.InteractionType.Embalm
+            && type != WGODef.InteractionType.ResurrectionTable) return null;
+
+        var inventory = data.Inventory?.Data?.Inventory;
+        if (inventory == null) return null;
+        foreach (var body in inventory)
+            if (body?.Definition != null && body.Definition.itemGroupIds.Contains("body")) return BodyLine(body);
+        return Loc.Get("status.table_empty");
+    }
+
+    /// <summary>"Body: 3 white skulls, 1 red skulls", with "zombie Urnen-Uli, " in front for a zombie.</summary>
+    private static string BodyLine(Item body)
+    {
+        int red = 0, white = 0;
+        if (body.Inventory != null)
+            foreach (var item in body.Inventory)
+            {
+                if (item?.Definition == null) continue;
+                red += item.Definition.redSkulls * item.Count;
+                white += item.Definition.whiteSkulls * item.Count;
+            }
+        var skulls = Loc.Fmt("body.skulls", Mathf.Clamp(white, 0, 999), Loc.Fmt("body.red_skulls", Mathf.Clamp(red, 0, 999)));
+
+        if (!body.Definition.itemGroupIds.Contains("zombie")) return skulls;
+        var name = ZombieName(MainGame.ZombieSystemData?.GetZombie(body.UniqueId));
+        return $"{(name == null ? Loc.Get("status.table_zombie_unnamed") : Loc.Fmt("status.table_zombie", name))}, {skulls}";
+    }
+
+    /// <summary>
+    /// "holds Iron Kit II, 12; brick, 3" for a factory chest (user, 2026-10-23: going through the
+    /// chests in the factory said nothing of what was in them, so collecting the outputs meant
+    /// walking to every one). Only the conveyor's own chests, whose few slots fill with one
+    /// product each; a home chest with thirty kinds would bury its name.
+    /// </summary>
+    internal static string FactoryChest(WgoData data)
+    {
+        var type = data?.Definition?.conveyorType ?? ConveyorElementType.None;
+        if (type != ConveyorElementType.Chest && type != ConveyorElementType.ChestOut) return null;
+        var inventory = data.Inventory?.Data?.Inventory;
+        if (inventory == null) return null;
+
+        var counts = new Dictionary<string, int>();
+        foreach (var item in inventory)
+        {
+            if (item == null || item.IsEmpty || string.IsNullOrEmpty(item.id)) continue;
+            counts[item.id] = (counts.TryGetValue(item.id, out var n) ? n : 0) + Math.Max(1, item.Count);
+        }
+        if (counts.Count == 0) return Loc.Get("status.table_empty");
+
+        var parts = counts.OrderByDescending(p => p.Value)
+            .Select(p => p.Value > 1 ? Loc.Fmt("inventory.item_many", ItemText.Name(p.Key), p.Value) : ItemText.Name(p.Key));
+        return Loc.Fmt("status.chest_holds", string.Join("; ", parts));
+    }
+
+    /// <summary>
+    /// What lies on a pallet: the morgue's corpse pallets (user, 2026-10-22: "Leichenpalette II"
+    /// gave no hint whether a corpse was on it) and the warehouse's crate pallets share
+    /// <c>InteractionType.TownPalette</c>. Bodies are read like a table's; anything else by name.
+    /// </summary>
+    internal static string Pallet(WgoData data)
+    {
+        // The morgue's pallets are CustomInteraction, not TownPalette (log, 2026-10-22), so they go
+        // by id - the ids the game's own body count (SaveCodeFixes_Helper) uses.
+        var corpsePallet = data?.id != null && data.id.StartsWith("pallet_corpse", StringComparison.Ordinal);
+        if (data?.Definition == null || (!corpsePallet && data.Definition.interactionType != WGODef.InteractionType.TownPalette)) return null;
+        var inventory = data.Inventory?.Data?.Inventory;
+        if (inventory == null) return null;
+
+        var parts = new List<string>();
+        var others = new Dictionary<string, int>();
+        foreach (var item in inventory)
+        {
+            if (item == null || item.IsEmpty || item.Definition == null || string.IsNullOrEmpty(item.id)) continue;
+            if (item.Definition.itemGroupIds.Contains("body")) parts.Add(BodyLine(item));
+            else others[item.id] = (others.TryGetValue(item.id, out var n) ? n : 0) + Math.Max(1, item.Count);
+        }
+        foreach (var pair in others)
+            parts.Add(pair.Value > 1 ? Loc.Fmt("inventory.item_many", ItemText.Name(pair.Key), pair.Value) : ItemText.Name(pair.Key));
+        return parts.Count == 0 ? Loc.Get("status.table_empty") : string.Join("; ", parts);
+    }
+
+    /// <summary>
+    /// "small house: can build; large house: missing 4 of 10 planks" for a town building place
+    /// (user, 2026-10-22: the list only said "Wohnhaus", and whether it could be built was only
+    /// learned by walking there). The buildings and the test are the desk's own:
+    /// <c>TownBuildingWgoComponent.GetAvailableBuildings</c>, and the player's
+    /// <c>MultiInventory</c> holding every cost.
+    /// </summary>
+    internal static string TownPlace(WgoData data)
+    {
+        if (data?.Definition == null || data.Definition.interactionType != WGODef.InteractionType.TownBuildingPlace) return null;
+        if (data.CraftComponent != null && data.CraftComponent.IsStarted) return null;
+        var player = MainGame.PlayerController?.PlayerData;
+        var buildings = data.TownBuildingWgoComponent?.GetAvailableBuildings(data);
+        if (player == null || buildings == null) return null;
+        if (buildings.Count == 0) return TmpText.Clean(LLBase.L("ui_builddesk_town_is_empty"));
+
+        var inventory = new MultiInventory(player);
+        var parts = new List<string>();
+        foreach (var building in buildings)
+        {
+            if (building == null) continue;
+            var missing = new List<string>();
+            foreach (var need in building.needItems ?? new List<NeedItemData>())
+            {
+                if (need == null) continue;
+                var count = need.GetCount(data);
+                var have = inventory.GetTotalCount(need.Id);
+                if (have < count) missing.Add(Loc.Fmt("tooltip.need_have", have, count, ItemText.Name(need.Id)));
+            }
+            var name = TmpText.Clean(LLBase.L(building.id));
+            parts.Add(missing.Count == 0
+                ? Loc.Fmt("status.town_can_build", name)
+                : Loc.Fmt("status.town_missing", name, string.Join(", ", missing)));
+        }
+        return parts.Count == 0 ? null : string.Join("; ", parts);
     }
 
     /// <summary>
@@ -143,7 +383,7 @@ internal static class ObjectStatus
             var status = element.CraftStatus;
             line = status == CraftStatus.OK || status == CraftStatus.Other
                 ? Loc.Fmt("status.queued", name)
-                : Loc.Fmt("status.queued_blocked", name, CraftReader.StatusText(status));
+                : Loc.Fmt("status.queued_blocked", name, CraftReader.StatusText(element, data));
         }
 
         var more = QueuedAfter(craft, element);

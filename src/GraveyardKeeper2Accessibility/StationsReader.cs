@@ -369,23 +369,307 @@ internal static class StationsReader
         var talents = G.ZombieTalents(window);
         if (talents != null && talents.Count > 0)
         {
-            var levels = talents.Select(t => Loc.Fmt("station.talent_level", TmpText.Clean(LLBase.L(t)), zombie.GetMasteryLevelForTalentBranch(t)));
+            // The ids, not LLBase: the game has no text for them and said "talent_orange 4".
+            var levels = talents.Select(t => Loc.Fmt("station.talent_level", TreesReader.TalentName(t), zombie.GetMasteryLevelForTalentBranch(t)));
             parts.Add(Loc.Fmt("station.zombie_talents", string.Join(", ", levels)));
         }
 
         parts.Add(Loc.Fmt("station.zombie_points", zombie.techRed, zombie.techGreen, zombie.techBlue));
         parts.Add(Loc.Fmt("station.zombie_perks", zombie.GetUsedPerksCount(), zombie.RedSkulls));
         parts.Add(Loc.Fmt("station.zombie_tab", ZombieTabName(window)));
-        parts.Add(Loc.Get("station.zombie_hint"));
+        if (OnPerksPage(window))
+        {
+            parts.Add(ZombieTalentSummary(window, withSlots: false));
+            parts.Add(Loc.Get("station.zperk_hint"));
+        }
+        else
+        {
+            parts.Add(Loc.Get("station.zombie_hint"));
+        }
         return Join(parts.ToArray());
     }
 
-    private static string ZombieTabName(UIZombieWorkerWindow window)
+    private static bool OnPerksPage(UIZombieWorkerWindow window)
     {
         var progression = G.ZombieProgression(window);
-        var perks = progression != null && progression.gameObject.activeSelf;
-        return TmpText.Clean(LLBase.L(perks ? "ui_zombie_wndw_perks" : "ui_zombie_wndw_char"));
+        return progression != null && progression.gameObject.activeSelf;
     }
+
+    private static string ZombieTabName(UIZombieWorkerWindow window) =>
+        TmpText.Clean(LLBase.L(OnPerksPage(window) ? "ui_zombie_wndw_perks" : "ui_zombie_wndw_char"));
+
+    // ---- a zombie's perks -------------------------------------------------------------------
+    //
+    // The perk page is the player's talent tree drawn for one zombie: the same TalentLevelUpWidget
+    // nodes, but only the price on screen ("50 red points") and, once learned, a red-skull sprite
+    // name. Learning costs the zombie's own red/green/blue points, and each learned perk takes one
+    // red skull: a zombie with 5 red skulls holds 5 perks. Losing red skulls switches the newest
+    // perks off (disabledTalentLevelUps) until skulls come back.
+
+    /// <summary>Zombie perks on a talent, as the game lists them on the page (hidden ones left out).</summary>
+    private static List<TalentLevelUpDef> ZombiePerkDefs(string talentId)
+    {
+        var hidden = MainGame.Instance.GameSave.knowledgeSystem.hiddenTalentLevelUps;
+        return GameBalance.Me.talentLevelUpDefs
+            .Where(d => d.isZombiePerk && d.talentId == talentId && !hidden.Contains(d.id))
+            .ToList();
+    }
+
+    /// <summary>The talent shown: mastery, how many perks it has, which are learned, how many can be learned now.</summary>
+    private static string ZombieTalentSummary(UIZombieWorkerWindow window, bool withSlots)
+    {
+        var data = G.ZombieData(window);
+        var zombie = data?.ZombieWgoData;
+        var talent = data?.ZombieProgressionWidgetData?.ZombieTalentData;
+        if (zombie == null || talent == null) return null;
+
+        var name = TreesReader.TalentName(talent.id);
+        var defs = ZombiePerkDefs(talent.id);
+        if (defs.Count == 0) return Join(name, Loc.Get("station.zperk_none"));
+
+        var learned = defs.Where(d => talent.studiedLevelUps.Contains(d.id)).ToList();
+        var ready = defs.Count(d => zombie.GetLevelUpState(d) == TalentLevelUpDef.State.Available);
+        var parts = new List<string>
+        {
+            Loc.Fmt("station.zperk_talent", name, zombie.GetMasteryLevelForTalentBranch(talent.id), defs.Count, learned.Count, ready),
+        };
+
+        // Named perks by name; the many "add mastery +1" nodes as one total, or the list is a stutter.
+        var named = learned.Where(d => !string.IsNullOrEmpty(d.linkedPerk)).Select(TreesReader.LevelUpName).ToList();
+        var mastery = learned.Where(d => string.IsNullOrEmpty(d.linkedPerk)).Sum(d => d.talentValueAdd);
+        if (mastery > 0) named.Add(Loc.Fmt("station.zperk_mastery_total", mastery));
+        if (named.Count > 0) parts.Add(Loc.Fmt("station.zperk_learned_list", string.Join(", ", named)));
+
+        var inactive = learned.Where(d => zombie.disabledTalentLevelUps.Contains(d.id)).Select(TreesReader.LevelUpName).ToList();
+        if (inactive.Count > 0) parts.Add(Loc.Fmt("station.zperk_inactive_list", string.Join(", ", inactive)));
+
+        if (withSlots)
+        {
+            parts.Add(Loc.Fmt("station.zombie_perks", zombie.GetUsedPerksCount(), zombie.RedSkulls));
+            parts.Add(Loc.Fmt("station.zombie_points", zombie.techRed, zombie.techGreen, zombie.techBlue));
+        }
+        return Join(parts.ToArray());
+    }
+
+    /// <summary>A perk node: name, learned or not, cost against the zombie's points, what it needs first, what it does.</summary>
+    private static string DescribeZombiePerk(TalentLevelUpWidget widget)
+    {
+        var def = widget.Data?.Def;
+        var zombie = widget.Data?.ZombieWgoData;
+        if (def == null || !def.isZombiePerk || zombie == null) return null;
+
+        // Live, not widget.Data.State: that was fixed when the page was drawn, before any purchase.
+        var state = zombie.GetLevelUpState(def);
+        if (state == TalentLevelUpDef.State.Unknown) return Loc.Get("tree.perk_unknown");
+
+        var parts = new List<string> { TreesReader.LevelUpName(def) };
+        var price = ZombiePrice(zombie, def);
+        switch (state)
+        {
+            case TalentLevelUpDef.State.Unlocked:
+                parts.Add(Loc.Get(zombie.disabledTalentLevelUps.Contains(def.id) ? "station.zperk_inactive" : "tree.learned"));
+                break;
+            case TalentLevelUpDef.State.Available:
+                parts.Add(price == null ? Loc.Get("tree.can_learn") : Loc.Fmt("station.zperk_can_learn", price));
+                break;
+            default:
+                if (!zombie.IsParentsUnlockedForTalentLevelUp(def)) parts.Add(Loc.Fmt("tree.needs_first", MissingZombieParents(zombie, def)));
+                if (price != null) parts.Add(Loc.Fmt("station.zperk_cost", price));
+                if (!zombie.IsEnoughFreeSkullsToBuyTalentLevelUp(def))
+                    parts.Add(Loc.Fmt("station.zperk_no_slot", zombie.GetUsedPerksCount(), zombie.RedSkulls));
+                break;
+        }
+
+        if (!string.IsNullOrEmpty(def.linkedPerk) && LLBase.HasL(def.linkedPerk + "_d"))
+            parts.Add(TmpText.Clean(LLBase.L(def.linkedPerk + "_d")));
+        return Join(parts.ToArray());
+    }
+
+    /// <summary>"50 red points, it has 1000", in the one colour the perk costs (the game checks red, then blue, then green).</summary>
+    private static string ZombiePrice(ZombieWgoData zombie, TalentLevelUpDef def)
+    {
+        if (def.techRed > 0) return Loc.Fmt("station.zperk_price", def.techRed, Loc.Get("icon.tech_red"), zombie.techRed);
+        if (def.techBlue > 0) return Loc.Fmt("station.zperk_price", def.techBlue, Loc.Get("icon.tech_blue"), zombie.techBlue);
+        if (def.techGreen > 0) return Loc.Fmt("station.zperk_price", def.techGreen, Loc.Get("icon.tech_green"), zombie.techGreen);
+        return null;
+    }
+
+    private static string MissingZombieParents(ZombieWgoData zombie, TalentLevelUpDef def)
+    {
+        var studied = zombie.GetTalentBranch(def.talentId)?.studiedLevelUps ?? new List<string>();
+        var missing = def.parents.Where(p => !studied.Contains(p))
+            .Select(p => GameBalance.Me.GetData<TalentLevelUpDef>(p))
+            .Where(p => p != null)
+            .Select(TreesReader.LevelUpName)
+            .ToList();
+        if (missing.Count == 0) return TmpText.Clean(LLBase.L("ui_previous_perk_locked"));
+        var any = def.lockType == TalentLevelUpDef.LockType.Any && missing.Count > 1;
+        return string.Join(any ? Loc.Get("tree.or") : ", ", missing);
+    }
+
+    private static string DescribeZombieTalentTab(UIZombieWorkerWindow window, string talentId)
+    {
+        var zombie = G.ZombieData(window)?.ZombieWgoData;
+        if (zombie == null) return null;
+        var ready = ZombiePerkDefs(talentId).Count(d => zombie.GetLevelUpState(d) == TalentLevelUpDef.State.Available);
+        return Loc.Fmt("station.zperk_tab", TreesReader.TalentName(talentId), zombie.GetMasteryLevelForTalentBranch(talentId), ready);
+    }
+
+    private static bool IsLearnableZombiePerk(GamepadNavigationItem item)
+    {
+        var widget = item.GetComponent<TalentLevelUpWidget>() ?? item.GetComponentInParent<TalentLevelUpWidget>();
+        var def = widget == null ? null : widget.Data?.Def;
+        var zombie = widget == null ? null : widget.Data?.ZombieWgoData;
+        return def != null && def.isZombiePerk && zombie != null && zombie.GetLevelUpState(def) == TalentLevelUpDef.State.Available;
+    }
+
+    /// <summary>Perk nodes the zombie can learn now, in reading order - top to bottom, left to right.</summary>
+    private static List<GamepadNavigationItem> LearnableZombiePerks(UIZombieWorkerWindow window) =>
+        window.GetComponentsInChildren<GamepadNavigationItem>(false)
+            .Where(n => n != null && n.Active && IsLearnableZombiePerk(n))
+            .OrderBy(ReadingOrder)
+            .ToList();
+
+    private static (float, float) ReadingOrder(GamepadNavigationItem item) =>
+        (-Mathf.Round(item.transform.position.y), item.transform.position.x);
+
+    /// <summary>
+    /// C / Shift+C in a zombie's window: focus the next (previous) perk it can learn, from where focus
+    /// is; past the last one on this talent, on to the next talent that has one. Same as the
+    /// inspiration page (<see cref="TreesReader"/>), with the zombie's points and skulls.
+    /// </summary>
+    private static bool CycleZombiePerk(UIZombieWorkerWindow window, int step)
+    {
+        var data = G.ZombieData(window);
+        var zombie = data?.ZombieWgoData;
+        if (zombie == null) return true;
+
+        if (!OnPerksPage(window))
+        {
+            Invoke(G.ZombieNextTab, window);
+            ScreenReader.ClearMenuContext();
+        }
+
+        var candidates = LearnableZombiePerks(window);
+        var focused = UiNarrator.FocusedItem;
+        var onPerk = focused != null && focused.transform.IsChildOf(window.transform) &&
+                     (focused.GetComponent<TalentLevelUpWidget>() ?? focused.GetComponentInParent<TalentLevelUpWidget>()) != null;
+
+        GamepadNavigationItem target = null;
+        if (candidates.Count > 0)
+        {
+            if (!onPerk)
+            {
+                target = candidates[step > 0 ? 0 : candidates.Count - 1];
+            }
+            else
+            {
+                // From the focused node's place, so it works whether or not that one is learnable.
+                var at = ReadingOrder(focused);
+                target = step > 0
+                    ? candidates.FirstOrDefault(c => ReadingOrder(c).CompareTo(at) > 0)
+                    : candidates.LastOrDefault(c => ReadingOrder(c).CompareTo(at) < 0);
+            }
+        }
+
+        if (target == null)
+        {
+            var current = data.ZombieProgressionWidgetData?.ZombieTalentData?.id;
+            var next = NextZombieTalentWithPerk(zombie, current, step);
+            if (next != null) return SwitchZombieTalentAndFocus(window, next, step);
+            if (candidates.Count == 0)
+            {
+                Say(ZombieNothingToLearn(zombie));
+                return true;
+            }
+            target = candidates[step > 0 ? 0 : candidates.Count - 1];
+        }
+
+        // Pressing again on the only one: focus stays put and says nothing, so read it here.
+        if (target == focused)
+        {
+            Say(Join(DescribeWidget(target), Loc.Get("station.zperk_only")));
+            return true;
+        }
+
+        FocusZombiePerk(window, target);
+        Plugin.Log?.LogInfo($"[Station] Next zombie perk: '{target.name}' ({candidates.Count} on this talent).");
+        return true;
+    }
+
+    /// <summary>The next open talent after <paramref name="current"/> (before it, going back) with a perk the zombie can learn.</summary>
+    private static string NextZombieTalentWithPerk(ZombieWgoData zombie, string current, int step)
+    {
+        var talents = GameBalance.Me.talentDefs.Select(d => d.id).ToList();
+        var from = talents.IndexOf(current);
+        for (var i = 1; i < talents.Count; i++)
+        {
+            var id = talents[((from + step * i) % talents.Count + talents.Count) % talents.Count];
+            if (id == current || !MainGame.Instance.GameSave.knowledgeSystem.IsTalentBranchUnlocked(id)) continue;
+            if (ZombiePerkDefs(id).Any(d => zombie.GetLevelUpState(d) == TalentLevelUpDef.State.Available)) return id;
+        }
+        return null;
+    }
+
+    /// <summary>Shows another talent the way its tab button does, says it, then focuses its first (or last) learnable perk.</summary>
+    private static bool SwitchZombieTalentAndFocus(UIZombieWorkerWindow window, string talentId, int step)
+    {
+        ScreenReader.ClearMenuContext();
+        G.ZombieData(window).ZombieProgressionWidgetData.SwitchTalent(talentId);
+        G.ZombieProgression(window).Redraw();
+        Say(ZombieTalentSummary(window, withSlots: false));
+        UiNarrator.QueueFocusUntil = Time.unscaledTime + 0.6f;
+
+        // The new nodes are laid out at the next canvas update; reading order needs their places now.
+        Canvas.ForceUpdateCanvases();
+        var candidates = LearnableZombiePerks(window);
+        if (candidates.Count == 0)
+        {
+            Plugin.Log?.LogWarning($"[Station] Switched the zombie to talent '{talentId}' but found no learnable perk on screen.");
+            return true;
+        }
+        var target = candidates[step > 0 ? 0 : candidates.Count - 1];
+        FocusZombiePerk(window, target);
+        Plugin.Log?.LogInfo($"[Station] Next zombie perk: '{target.name}' in talent '{talentId}' ({candidates.Count} there).");
+        return true;
+    }
+
+    private static void FocusZombiePerk(UIZombieWorkerWindow window, GamepadNavigationItem target)
+    {
+        var focused = UiNarrator.FocusedItem;
+        var controller = focused != null && focused.Controller != null && focused.transform.IsChildOf(window.transform)
+            ? focused.Controller
+            : window.GetComponentInChildren<GamepadNavigationController>();
+        if (controller == null) return;
+        // SetFocusedItem only knows items from the controller's last scan (see ChestSections).
+        controller.ReinitItems(focusOnFirstActive: false);
+        controller.SetFocusedItem(target);
+    }
+
+    private static string ZombieNothingToLearn(ZombieWgoData zombie)
+    {
+        var used = zombie.GetUsedPerksCount();
+        return used >= zombie.RedSkulls
+            ? Loc.Fmt("station.zperk_nothing_slots", used, zombie.RedSkulls)
+            : Join(Loc.Get("station.zperk_nothing_points"),
+                   Loc.Fmt("station.zombie_points", zombie.techRed, zombie.techGreen, zombie.techBlue));
+    }
+
+    /// <summary>A perk bought here, with Enter on its node. On screen only the sprite changes.</summary>
+    [HarmonyPatch(typeof(ZombieWgoData), nameof(ZombieWgoData.PurchaseTalentLevelUp))]
+    [HarmonyPostfix]
+    private static void ZombieWgoData_PurchaseTalentLevelUp(ZombieWgoData __instance, TalentLevelUpDef def, bool free) =>
+        Guard("zombie perk purchase", () =>
+        {
+            if (free || def == null || !(LazyWindowsStackController.ActiveWindow is UIZombieWorkerWindow)) return;
+            var text = Join(Loc.Fmt("tree.tech_learned", TreesReader.LevelUpName(def)),
+                Loc.Fmt("station.zombie_perks", __instance.GetUsedPerksCount(), __instance.RedSkulls),
+                Loc.Fmt("station.zombie_points", __instance.techRed, __instance.techGreen, __instance.techBlue));
+            Plugin.Log?.LogInfo($"[Station] \"{text}\"");
+            // Protected: the node redraws under focus right after, and must not cut this off.
+            ScreenReader.SayProtected(text, interrupt: true);
+            UiNarrator.QueueFocusUntil = Time.unscaledTime + 1.5f;
+        });
 
     private static string DescribeBait(UIFishingWindow window)
     {
@@ -446,7 +730,13 @@ internal static class StationsReader
             var building = item.GetComponent<UITownBuildingWidget>();
             if (building != null) return DescribeTownBuilding(building);
 
+            var levelUp = item.GetComponent<TalentLevelUpWidget>() ?? item.GetComponentInParent<TalentLevelUpWidget>();
+            if (levelUp != null && levelUp.Data?.Def != null && levelUp.Data.Def.isZombiePerk) return DescribeZombiePerk(levelUp);
+
             var window = LazyWindowsStackController.ActiveWindow;
+            if (window is UIZombieWorkerWindow zombieWindow && item.GetComponentInParent<TalentTabButton>() is { } tab)
+                return DescribeZombieTalentTab(zombieWindow, tab.TalentId);
+
             var cell = item.GetComponent<UIItemCell>() ?? item.GetComponentInParent<UIItemCell>();
             switch (window)
             {
@@ -575,12 +865,35 @@ internal static class StationsReader
                 return true;
             }
 
-            if (ctrl && window is UIZombieWorkerWindow zombie &&
-                (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.RightArrow)))
+            if (window is UIZombieWorkerWindow perks)
             {
-                Invoke(Input.GetKeyDown(KeyCode.RightArrow) ? G.ZombieNextTab : G.ZombiePrevTab, zombie);
+                if (TreesReader.NextUnlockableKey.IsDown()) return CycleZombiePerk(perks, 1);
+                if (TreesReader.PrevUnlockableKey.IsDown()) return CycleZombiePerk(perks, -1);
+            }
+
+            // As on the tech tree: Ctrl+up/down switch the page, Ctrl+left/right the talent on the
+            // perk page. On the character page there are no talents, so left/right switch the page.
+            if (ctrl && window is UIZombieWorkerWindow zombie)
+            {
+                var vertical = Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.DownArrow);
+                var horizontal = Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.RightArrow);
+                if (!vertical && !horizontal) return false;
+
+                var forward = Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.DownArrow);
                 ScreenReader.ClearMenuContext();
-                Say(ZombieTabName(zombie));
+                if (horizontal && OnPerksPage(zombie))
+                {
+                    if (forward) zombie.OnPressedNextSubTab();
+                    else zombie.OnPressedPrevSubTab();
+                    Say(ZombieTalentSummary(zombie, withSlots: true));
+                }
+                else
+                {
+                    Invoke(forward ? G.ZombieNextTab : G.ZombiePrevTab, zombie);
+                    Say(OnPerksPage(zombie)
+                        ? Join(ZombieTabName(zombie), ZombieTalentSummary(zombie, withSlots: true), Loc.Get("station.zperk_hint"))
+                        : ZombieTabName(zombie));
+                }
                 UiNarrator.QueueFocusUntil = Time.unscaledTime + 0.6f;
                 return true;
             }

@@ -60,13 +60,18 @@ internal static class TreesReader
     private static ConfigEntry<KeyboardShortcut> _nextUnlockableKey;
     private static ConfigEntry<KeyboardShortcut> _prevUnlockableKey;
 
+    /// <summary>C and Shift+C, shared with a zombie's perk page (<see cref="StationsReader"/>).</summary>
+    internal static KeyboardShortcut NextUnlockableKey => _nextUnlockableKey.Value;
+    internal static KeyboardShortcut PrevUnlockableKey => _prevUnlockableKey.Value;
+
     internal static void Init(ConfigFile config)
     {
         _nextUnlockableKey = ModKeys.Bind(config,
             "Trees", "NextUnlockable", new KeyboardShortcut(KeyCode.C),
             "On the inspiration page: jumps to the next thing you can buy right now - a finished " +
             "inspiration you have the faith for, or a perk you have the talent points for, in any talent. On the tech " +
-            "tree: jumps to the next technology your points can learn, in any open branch.");
+            "tree: jumps to the next technology your points can learn, in any open branch. On a zombie's perk " +
+            "page: jumps to the next perk the zombie can learn, in any talent.");
         _prevUnlockableKey = ModKeys.Bind(config,
             "Trees", "PreviousUnlockable", new KeyboardShortcut(KeyCode.C, KeyCode.LeftShift),
             "The same, backwards.");
@@ -515,7 +520,7 @@ internal static class TreesReader
         return Join(parts.ToArray());
     }
 
-    private static string LevelUpName(TalentLevelUpDef def)
+    internal static string LevelUpName(TalentLevelUpDef def)
     {
         if (!string.IsNullOrEmpty(def.linkedPerk))
         {
@@ -535,14 +540,17 @@ internal static class TreesReader
                     talent.HasCompletedInspirationToBuy() ? Loc.Get("tree.something_to_buy") : null);
     }
 
-    /// <summary>The perk nodes' own tooltip repeats the name and description the focus line already gave.</summary>
+    /// <summary>
+    /// The perk nodes' own tooltip repeats the name and description the focus line already gave -
+    /// here and on a zombie's perk page (<see cref="StationsReader"/>).
+    /// </summary>
     [HarmonyPatch(typeof(UITooltip), nameof(UITooltip.ShowTalentLevelUpWidget))]
     [HarmonyPrefix]
     private static void UITooltip_ShowTalentLevelUpWidget(TalentLevelUpWidget widget)
     {
         try
         {
-            if (widget != null && widget.Data?.Def != null && !widget.Data.Def.isZombiePerk)
+            if (widget != null && widget.Data?.Def != null)
                 TooltipReader.SuppressNext = true;
         }
         catch { /* the tooltip is read normally then */ }

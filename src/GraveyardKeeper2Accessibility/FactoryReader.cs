@@ -227,12 +227,12 @@ internal static class FactoryReader
     private static string Workbench(Node node)
     {
         var data = node.Data;
-        var parts = new List<string> { ObjectNames.Of(data.id) };
+        // Where it stands, as the lines say it: two benches of one kind read the same otherwise
+        // (user, 2026-10-24: which "Montagebank I" was the one waiting to drop its Holzbausatz?).
+        var parts = new List<string> { Loc.Fmt("factory.station_at", ObjectNames.Of(data.id), Navigator.KeyDirections(Flat(node.Position - PlayerPosition()))) };
 
-        if (data.Worker is ZombieWgoData zombie)
-            parts.Add(Loc.Fmt("factory.worker", string.IsNullOrWhiteSpace(zombie.Name) ? ObjectNames.Of(zombie.id) : zombie.Name));
-        else if (data.Worker == null && !data.Definition.isAutoCrafter)
-            parts.Add(Loc.Get("factory.no_worker"));
+        var worker = Worker(data);
+        if (worker != null) parts.Add(worker);
 
         var craft = data.CraftComponent;
         string state = null;
@@ -249,7 +249,19 @@ internal static class FactoryReader
 
         if (craft != null)
         {
-            if (craft.Status == CraftComponentStatus.WaitingForOutputDrop) parts.Add(Loc.Get("factory.output_blocked"));
+            if (craft.Status == CraftComponentStatus.WaitingForOutputDrop)
+            {
+                // A bench puts its result out only onto an empty belt piece, and a started order
+                // cannot be taken back - so the belt to empty is the way out (user, 2026-10-24).
+                var waiting = Load(data.CraftableObjectCraftInventory?.Data?.Inventory);
+                parts.Add(waiting == null ? Loc.Get("factory.output_blocked") : Loc.Fmt("factory.output_blocked_items", waiting));
+                foreach (var belt in node.Out.Where(o => o.IsBelt))
+                {
+                    var load = BeltLoad(belt.Data);
+                    if (load != null)
+                        parts.Add(Loc.Fmt("factory.out_belt_holds", load, Navigator.KeyDirections(Flat(belt.Position - PlayerPosition()))));
+                }
+            }
 
             var missing = Missing(data);
             if (missing != null) parts.Add(Loc.Fmt("factory.missing", missing));
@@ -262,6 +274,177 @@ internal static class FactoryReader
         if (open != null) parts.Add(open);
 
         return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// "takes from Clay chest at 4 west, sends to Forge at 3 east" - for a factory workbench in the
+    /// object list (user, 2026-10-24: with many assembly benches and forges, which one gets what?).
+    /// Each belt is followed to the chest, bench, splitter or pallet at its other end. Null for
+    /// anything that is not a factory workbench.
+    /// </summary>
+    /// <summary>
+    /// "zombie Urnen-Uli" or "no zombie at it" for a factory bench, null for anything else or a
+    /// bench that runs by itself. Said in the object list too, so cycling the benches finds the
+    /// ones still waiting for a zombie (user, 2026-10-25).
+    /// </summary>
+    internal static string Worker(WgoData data)
+    {
+        if (data is not ConveyorWgoData || data.Definition?.conveyorType != ConveyorElementType.Workbench) return null;
+        if (data.Worker is ZombieWgoData zombie)
+            return Loc.Fmt("factory.worker", string.IsNullOrWhiteSpace(zombie.Name) ? ObjectNames.Of(zombie.id) : TmpText.Clean(LLBase.L(zombie.Name)));
+        return data.Worker == null && !data.Definition.isAutoCrafter ? Loc.Get("factory.no_worker") : null;
+    }
+
+    internal static string BenchLinks(WgoData data)
+    {
+        if (data is not ConveyorWgoData || data.Definition?.conveyorType != ConveyorElementType.Workbench) return null;
+        try
+        {
+            var node = Graph(data.WorldId).FirstOrDefault(n => ReferenceEquals(n.Data, data));
+            if (node == null) return null;
+
+            var from = PlayerPosition();
+            var parts = new List<string>
+            {
+                node.In.Count == 0 ? Loc.Get("factory.no_belt_in") : Loc.Fmt("factory.takes_from", Ends(node, upstream: true, from)),
+                node.Out.Count == 0 ? Loc.Get("factory.no_belt_out") : Loc.Fmt("factory.sends_to", Ends(node, upstream: false, from)),
+            };
+            return string.Join(", ", parts);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Factory] Could not read the links of bench '{data.id}': {ex.Message}{Environment.NewLine}{ex.StackTrace}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// For remove mode: what a factory piece is joined to (user, 2026-10-24: "the entfernen mode
+    /// should also tell me what is connected to what", to find the broken pieces to tear down). A
+    /// belt says which way it runs, where its items come from and go to, followed to the chest or
+    /// bench at each end, and whether it is itself a dead end or unfed. Null for anything else.
+    /// </summary>
+    internal static string PieceLinks(WgoData data)
+    {
+        if (data is not ConveyorWgoData || data.Definition == null || data.Definition.conveyorType == ConveyorElementType.None) return null;
+        try
+        {
+            var node = Graph(data.WorldId).FirstOrDefault(n => ReferenceEquals(n.Data, data));
+            if (node == null) return null;
+
+            var from = PlayerPosition();
+            if (!node.IsBelt)
+                return string.Join(", ",
+                    node.In.Count == 0 ? Loc.Get("factory.no_belt_in") : Loc.Fmt("factory.takes_from", Ends(node, upstream: true, from)),
+                    node.Out.Count == 0 ? Loc.Get("factory.no_belt_out") : Loc.Fmt("factory.sends_to", Ends(node, upstream: false, from)));
+
+            var parts = new List<string>();
+            var facing = BeltFacing(data);
+            if (facing != null) parts.Add(Loc.Fmt("factory.runs_to", Side(facing.Value)));
+            parts.Add(node.In.Count == 0 ? Loc.Get("factory.belt_unfed") : Loc.Fmt("factory.belt_from", Ends(node, upstream: true, from)));
+            parts.Add(node.Out.Count == 0 ? DeadEnd(node, facing, from) : Loc.Fmt("factory.belt_to", Ends(node, upstream: false, from)));
+            var load = BeltLoad(data);
+            if (load != null) parts.Add(Loc.Fmt("factory.belt_carries", load));
+            return string.Join(", ", parts);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[Factory] Could not read the links of '{data.id}': {ex.Message}{Environment.NewLine}{ex.StackTrace}");
+            return null;
+        }
+    }
+
+    /// <summary>The belt pieces among these that end in nothing or that nothing feeds - the ones a line reads as a problem.</summary>
+    internal static HashSet<WgoData> BrokenBelts(string sceneId)
+    {
+        var broken = new HashSet<WgoData>();
+        foreach (var node in Graph(sceneId))
+            if (node.IsBelt && (node.In.Count == 0 || node.Out.Count == 0))
+                broken.Add(node.Data);
+        return broken;
+    }
+
+    /// <summary>The pieces at the far ends of a bench's belts, one way: "Chest at 4 west and a dead end".</summary>
+    private static string Ends(Node bench, bool upstream, Vector3 from)
+    {
+        var ends = new List<string>();
+        var seen = new HashSet<object>(ByReference.Instance) { bench };
+        var queue = new Queue<(Node Node, Node Via)>((upstream ? bench.In : bench.Out).Select(n => (n, bench)));
+        var unfed = false;
+        var deadEnd = false;
+
+        while (queue.Count > 0)
+        {
+            var (cur, via) = queue.Dequeue();
+            if (!seen.Add(cur)) continue;
+
+            if (!cur.IsBelt)
+            {
+                var text = Loc.Fmt("factory.station_at", ObjectNames.Of(cur.Data.id), Navigator.KeyDirections(Flat(cur.Position - from)));
+                // A chest sends out only the item chosen for that side: that is what to put in it.
+                if (upstream && cur.Data.ConveyorComponent is ConveyorChestComponent chest)
+                {
+                    // An unused side holds no belt id at all (SGuid is a class, Clear() nulls it).
+                    var slot = chest.SlotsData?.Find(s => s != null && s.conveyorWgoDataUniqueId != null && s.conveyorWgoDataUniqueId.Equals(via.Data.UniqueId));
+                    if (slot != null)
+                        text += ", " + (string.IsNullOrEmpty(slot.slotItemId)
+                            ? Loc.Get("factory.chest_sends_nothing")
+                            : Loc.Fmt("factory.chest_sends", ItemText.Name(slot.slotItemId)));
+                }
+                if (!ends.Contains(text)) ends.Add(text);
+                continue;
+            }
+
+            var next = upstream ? cur.In : cur.Out;
+            if (next.Count == 0)
+            {
+                if (upstream) unfed = true;
+                else deadEnd = true;
+            }
+            foreach (var n in next) queue.Enqueue((n, cur));
+        }
+
+        if (unfed) ends.Add(Loc.Get("factory.end_unfed"));
+        if (deadEnd) ends.Add(Loc.Get("factory.end_dead"));
+        return ends.Count == 0 ? Loc.Get("factory.loops") : string.Join(Loc.Get("factory.and"), ends);
+    }
+
+    /// <summary>What lies on a belt piece - "Holzbausatz" - or null when it is empty.</summary>
+    internal static string BeltLoad(WgoData data) => Load(data?.Inventory?.Data?.Inventory);
+
+    private static string Load(List<Item> items)
+    {
+        if (items == null || items.Count == 0) return null;
+        var names = items.Where(i => i != null && !string.IsNullOrEmpty(i.id))
+            .Select(i => i.Count > 1 ? $"{i.Count} {ItemText.Name(i.id)}" : ItemText.Name(i.id))
+            .ToList();
+        return names.Count == 0 ? null : string.Join(", ", names);
+    }
+
+    /// <summary>
+    /// "every belt piece holds something: 5 Holzbausatz" - what lies along a line. A line that is
+    /// full to its start is where a bench stands waiting to put its result out.
+    /// </summary>
+    private static string LineLoad(List<Node> belts)
+    {
+        var counts = new Dictionary<string, int>();
+        var loaded = 0;
+        foreach (var belt in belts)
+        {
+            var items = belt.Data.Inventory?.Data?.Inventory;
+            if (items == null || items.Count == 0) continue;
+            loaded++;
+            foreach (var item in items)
+            {
+                if (item == null || string.IsNullOrEmpty(item.id)) continue;
+                var name = ItemText.Name(item.id);
+                counts[name] = (counts.TryGetValue(name, out var n) ? n : 0) + Math.Max(1, item.Count);
+            }
+        }
+        if (loaded == 0 || counts.Count == 0) return null;
+
+        var what = string.Join(", ", counts.Select(c => $"{c.Value} {c.Key}"));
+        return loaded == belts.Count ? Loc.Fmt("factory.line_full", what) : Loc.Fmt("factory.line_items", what);
     }
 
     /// <summary>What the first order still lacks, the way <c>ConveyorWorkbenchComponent.GetItemFromConveyor</c> checks it.</summary>
@@ -388,6 +571,7 @@ internal static class FactoryReader
         }
 
         var seen = new HashSet<object>(ByReference.Instance);
+        var belts = new List<Node>();
         var cur = first;
         string end;
         while (true)
@@ -409,6 +593,7 @@ internal static class FactoryReader
                 break;
             }
             walked.Add(cur);
+            belts.Add(cur);
 
             if (cur.Out.Count == 0)
             {
@@ -431,7 +616,9 @@ internal static class FactoryReader
         }
 
         var body = runs.Count == 0 ? null : Loc.Fmt("factory.runs", string.Join(", ", runs.Select(r => Loc.Fmt("factory.run", r.Count, DirName(r.Dir)))));
-        return body == null ? $"{head}: {end}" : $"{head}: {body}, {end}";
+        var text = body == null ? $"{head}: {end}" : $"{head}: {body}, {end}";
+        var load = LineLoad(belts);
+        return load == null ? text : $"{text}. {load}";
     }
 
     /// <summary>"dead end, points at Sawbench but is not joined to it" - the commonest building mistake.</summary>
@@ -513,6 +700,60 @@ internal static class FactoryReader
             _log?.LogWarning($"[Factory] Could not work out what the piece would join: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>How many links the piece on the pointer would make where it stands; 0 for anything not a factory piece.</summary>
+    internal static int LinkCount(Wgo pointer)
+    {
+        if (!IsConveyor(pointer)) return 0;
+        try
+        {
+            return PredictLinks(pointer).Count;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Ground points worth trying for a new factory piece: where each standing piece's connectors
+    /// reach out (the cell a belt end or a bench's side would hand to), and the cells round every
+    /// belt, each with its neighbours a cell either way. The marked factory floor is one big area
+    /// whose centres the free-spot search tried, so the cell between Küche II and its supply station
+    /// was never offered (user, 2026-10-24: "I can't find the right spots anymore").
+    /// </summary>
+    internal static List<Vector3> LinkCandidates(float cellX, float cellZ)
+    {
+        var points = new List<Vector3>();
+        var seen = new HashSet<(int, int)>();
+        void Add(Vector3 p)
+        {
+            for (var i = -1; i <= 1; i++)
+            for (var j = -1; j <= 1; j++)
+            {
+                if (i != 0 && j != 0) continue;
+                var q = new Vector3(p.x + i * cellX, p.y, p.z + j * cellZ);
+                if (seen.Add((Mathf.RoundToInt(q.x / cellX), Mathf.RoundToInt(q.z / cellZ)))) points.Add(q);
+            }
+        }
+
+        foreach (var node in Graph(CurrentSceneId()))
+        {
+            var wgo = GameScene.GetWgoViewGlobal(node.Data.UniqueId);
+            if (wgo == null) continue;
+            foreach (var connector in wgo.GetComponentsInChildren<BuildConnector>())
+            {
+                if (connector == null || !connector.gameObject.activeInHierarchy) continue;
+                var at = connector.BoxCollider != null ? connector.BoxCollider.bounds.center : connector.transform.position;
+                // A connector sits on the piece's edge; the cell it reaches into is the same way out again.
+                var outward = at - wgo.transform.position;
+                outward.y = 0f;
+                Add(at + outward.normalized * Mathf.Min(cellX, cellZ) * 0.5f);
+            }
+            if (node.IsBelt) Add(node.Position);
+        }
+        return points;
     }
 
     /// <summary>"runs east" for a belt; "in west, out east" for a piece with several connectors.</summary>

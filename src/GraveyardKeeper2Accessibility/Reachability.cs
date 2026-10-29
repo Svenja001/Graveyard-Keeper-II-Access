@@ -89,6 +89,8 @@ internal static class Reachability
         {
             // The other level of a room with a ladder is on a graph of its own.
             foreach (var graph in new[] { _graph }.Concat(InteriorNavmesh.Graphs.Where(g => g != _graph)))
+            {
+                if (!MayHaveFloorNear(graph, position, ProbeSearch + 3f)) continue;
                 foreach (var offset in Probes)
                 {
                     var probe = position + offset;
@@ -100,6 +102,7 @@ internal static class Reachability
                     if (Mathf.Abs(nearest.position.y - position.y) > MaxClimb) continue;
                     if (Areas.Contains(nearest.node.Area)) return true;
                 }
+            }
         }
         catch
         {
@@ -144,7 +147,7 @@ internal static class Reachability
             foreach (var graph in graphs)
             {
                 // A graph with no nodes is not loaded; it says nothing about where floor is.
-                if (graph == null || graph.CountNodes() == 0) continue;
+                if (!HasNodes(graph)) continue;
                 asked++;
                 if (HasFloorNear(graph, data.Position)) return false;
             }
@@ -157,7 +160,7 @@ internal static class Reachability
                 AnyFloorCache[key] = anyFloor;
             }
             if (anyFloor.floor) return false;
-            if (asked == 0 && (own == null || own.CountNodes() == 0)) return false;
+            if (asked == 0 && !HasNodes(own)) return false;
 
             ParkedDetail = $"scene '{data.WorldId}', {asked} of {graphs.Count} graph(s) with nodes, player graph {(own == null ? "none" : own.graphIndex.ToString())}, no floor on any loaded graph";
             return true;
@@ -178,7 +181,53 @@ internal static class Reachability
         var all = AstarPath.active == null || AstarPath.active.data == null ? null : AstarPath.active.data.graphs;
         if (all == null) yield break;
         foreach (var g in all)
-            if (g is Pathfinding.RecastGraph recast && recast.CountNodes() > 0) yield return recast;
+            if (g is Pathfinding.RecastGraph recast && HasNodes(recast)) yield return recast;
+    }
+
+    /// <summary>
+    /// <c>CountNodes() &gt; 0</c>, answered once per frame per graph.
+    ///
+    /// <para>
+    /// <b>Reported (2026-10-25): the object list took 630 ms in the town guard barracks</b>, for 20
+    /// objects. <c>CountNodes</c> walks every node of the graph - navmeshes do not override it - and
+    /// the parked test asked it of the town's navmesh for each of the 330 objects outside the room.
+    /// Elsewhere the test stops earlier, at floor under the player's own graph; in the barracks that
+    /// graph is the small one <see cref="InteriorNavmesh"/> scans, so everything fell through.
+    /// </para>
+    /// </summary>
+    internal static bool HasNodes(Pathfinding.NavGraph graph)
+    {
+        if (graph == null) return false;
+        if (NodeCountFrame != Time.frameCount)
+        {
+            NodeCountFrame = Time.frameCount;
+            HasNodesCache.Clear();
+        }
+        if (!HasNodesCache.TryGetValue(graph, out var has))
+        {
+            has = graph.CountNodes() > 0;
+            HasNodesCache[graph] = has;
+        }
+        return has;
+    }
+
+    /// <summary>For a graph just scanned in this frame.</summary>
+    internal static void ForgetNodeCounts() => HasNodesCache.Clear();
+
+    private static readonly Dictionary<Pathfinding.NavGraph, bool> HasNodesCache = new();
+    private static int NodeCountFrame = -1;
+
+    /// <summary>
+    /// False when <paramref name="position"/> is farther than <paramref name="search"/> from anything
+    /// the graph covers, so no floor search is needed - the room graph is 20 m across and most of the
+    /// objects asked about lie outside it. A circle round the bounds, so rotation does not matter.
+    /// </summary>
+    private static bool MayHaveFloorNear(Pathfinding.NavGraph graph, Vector3 position, float search)
+    {
+        if (graph is not Pathfinding.RecastGraph recast) return true;
+        var size = recast.forcedBoundsSize;
+        var radius = new Vector2(size.x, size.z).magnitude / 2f;
+        return Flat(position - recast.forcedBoundsCenter) <= radius + search;
     }
 
     private static Pathfinding.RecastGraph _floorGraph;
@@ -195,6 +244,22 @@ internal static class Reachability
     internal static Pathfinding.RecastGraph FloorGraph(PlayerController player)
     {
         if (player == null) return null;
+
+        // Asked once per object by the parked test; the unbounded lookups below are slow where
+        // the scene has no floor near the player - the barracks (2026-10-25).
+        if (_floorGraphFrame == Time.frameCount && ReferenceEquals(_floorGraphPlayer, player)) return _floorGraphNow;
+        _floorGraphNow = FloorGraphUncached(player);
+        _floorGraphFrame = Time.frameCount;
+        _floorGraphPlayer = player;
+        return _floorGraphNow;
+    }
+
+    private static Pathfinding.RecastGraph _floorGraphNow;
+    private static int _floorGraphFrame = -1;
+    private static PlayerController _floorGraphPlayer;
+
+    private static Pathfinding.RecastGraph FloorGraphUncached(PlayerController player)
+    {
         var scene = player.SceneRecastGraph;
         var at = player.MovablePosition;
 
@@ -290,7 +355,7 @@ internal static class Reachability
 
     private static bool HasFloorNear(Pathfinding.NavGraph graph, Vector3 position)
     {
-        if (graph == null) return false;
+        if (graph == null || !MayHaveFloorNear(graph, position, ParkedSearch)) return false;
         var nearest = NearestWithin(graph, position, ParkedSearch);
         return nearest.node != null && Flat(nearest.position - position) <= ParkedDistance;
     }

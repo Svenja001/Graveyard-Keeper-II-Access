@@ -87,7 +87,7 @@ internal static class ToolSlotReader
     }
 
     /// <summary>"Bauen +2" - the mastery the tool adds, or null when it adds none.</summary>
-    private static string Bonus(ItemDef def)
+    internal static string Bonus(ItemDef def)
     {
         if (def.talentBonus <= 0 || def.talentIds == null || def.talentIds.Count == 0) return null;
         return string.Join(", ", def.talentIds.Select(t => Loc.Fmt("toolslot.bonus", CraftReader.TalentName(t), def.talentBonus)));
