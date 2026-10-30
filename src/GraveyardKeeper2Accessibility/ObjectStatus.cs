@@ -387,7 +387,9 @@ internal static class ObjectStatus
         }
 
         var more = QueuedAfter(craft, element);
-        return more == null ? line : $"{line}, {more}";
+        if (more != null) line = $"{line}, {more}";
+        var output = CraftReader.QueueOutput(craft.CraftElementsQueue, element, data);
+        return output == null ? line : $"{line}, {output}";
     }
 
     /// <summary>"3 water" - what went into an order, or null when nothing is recorded.</summary>

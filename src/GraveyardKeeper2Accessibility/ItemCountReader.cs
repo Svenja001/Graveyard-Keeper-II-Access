@@ -107,6 +107,40 @@ internal static class ItemCountReader
         return price == null ? text : $"{text}, {price}";
     }
 
+    private static readonly MethodInfo ChangeValue = AccessTools.Method(typeof(SmartSlider), "ChangeValue");
+
+    /// <summary>
+    /// Page up / Page down: ten more or ten fewer - the step 1.011 gave the controller's bumpers
+    /// (<c>GameKey.ItemCountWindow_IncreaseFast</c>), which has no keyboard binding. Through the
+    /// slider's own step, so its snapping, limits, click and the value announcement all apply.
+    /// False when the quantity window is not on top or neither key was pressed.
+    /// </summary>
+    internal static bool TryFastStep()
+    {
+        var window = Active;
+        if (window == null || ChangeValue == null) return false;
+
+        var delta = Input.GetKeyDown(KeyCode.PageUp) ? SmartSlider.GAMEPAD_FAST_SLIDER_CHANGE_VALUE
+            : Input.GetKeyDown(KeyCode.PageDown) ? -SmartSlider.GAMEPAD_FAST_SLIDER_CHANGE_VALUE
+            : 0;
+        if (delta == 0) return false;
+
+        try
+        {
+            var slider = G.Slider(window);
+            if (slider == null) return false;
+            var before = slider.Value;
+            ChangeValue.Invoke(slider, new object[] { delta, true });
+            // At the limit nothing changes and nothing is announced; say where it stopped.
+            if (slider.Value == before) Say(DescribeValue(slider));
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log?.LogError($"[Count] Fast step failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        return true;
+    }
+
     /// <summary>Enter presses OK. False when the quantity window is not on top.</summary>
     internal static bool TryConfirm()
     {

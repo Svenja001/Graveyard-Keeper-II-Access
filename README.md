@@ -115,16 +115,19 @@ the game's own event for it, exactly as walking in would have.
 
 ## Known limitations
 
-- **Only the first squad fight has been played.** "Break Through to the Port" was won with the mod
-  alone; later fights, with more squads and other battlefields, are not tested yet. Not done at
-  all: aiming the bow.
-- **The cellar factory is built from the game's code but not yet tried in play.** G, Shift+G and
-  Ctrl+G read it, and placing belts says what they join, but expect gaps. How zombies are put on
-  the carousel has not been looked at separately.
+- **Aiming the bow is not supported yet.** Squad fights themselves work: almost all of them have
+  been played through with the mod.
 - **Auto-walk can still fail.** Sometimes it says there is no route where there is one —
-  across some bridges and doors, or in rooms the game has no walking map for (the mod builds one
-  itself for those, which is new and untested). Walking there by hand usually works, and auto-walk
-  can do the rest from there. Auto-walk refuses to start while a story scene is moving you.
+  across some bridges and doors, or on raised floors such as platforms inside rooms the game has
+  no walking map for (the mod builds one itself for those). Walking there by hand usually works,
+  and auto-walk can do the rest from there. Auto-walk refuses to start while a story scene is
+  moving you.
+- **Two storage mods clash with this one.** *Linked Storage* (0.7.2) breaks opening a bag in the
+  character window: items that fit the bag go silent and cannot be moved in. Setting
+  `NetworkMoveAll = false` in its config avoids it. *Storage Access* (1.1.2) has a controller
+  feature that also takes over the arrow keys in item lists, because this mod tells the game a
+  controller is present; set `ListNavigation = false` in its config. Its keys C, Z and J are
+  also keys of this mod.
 - **If a scene ends and only the mod's keys still work,** press Ctrl+F5 twice to take your controls
   back. That should not happen any more, but it is there in case it does.
 - **Not covered yet:** the map page in the character window (only the travel stone's map is read).

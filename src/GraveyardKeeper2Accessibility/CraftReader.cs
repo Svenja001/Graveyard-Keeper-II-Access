@@ -628,6 +628,9 @@ internal static class CraftReader
         if (element.CraftStatus != CraftStatus.OK && element.CraftStatus != CraftStatus.Other)
             parts.Add(StatusText(element, data.WgoData));
 
+        var output = QueueOutput(queue, element, data.WgoData);
+        if (output != null) parts.Add(output);
+
         return string.Join(", ", parts);
     }
 
@@ -721,6 +724,8 @@ internal static class CraftReader
                         : line;
                 });
                 parts.Add(Loc.Fmt("craft.queue", string.Join("; ", entries)));
+                // One total per item, as the game shows it for whichever entry is on its hint.
+                parts.AddRange(queue.Select(e => QueueOutput(queue, e, wgo)).Where(t => t != null).Distinct());
                 parts.Add(Loc.Fmt("craft.queue_keys", KeyFor(GameKey.CraftWindowZoneSwitch, _zoneKey)));
             }
         }
@@ -1360,6 +1365,33 @@ internal static class CraftReader
         if (data.itemVariants != null && data.itemVariants.Count > 1)
             text = Loc.Fmt("craft.variant", text, data.currentItemIndex + 1, data.itemVariants.Count);
         return text;
+    }
+
+    private static readonly MethodInfo QueueOutputResolve = AccessTools.Method(typeof(CraftQueueOutputIndicator), "TryResolve");
+
+    /// <summary>
+    /// "whole queue makes 30 iron bars": the "×N" the game shows on a station's craft hint since
+    /// 1.011 (<c>CraftQueueOutputIndicator</c>), with its own rules - only when more than one craft
+    /// in the queue makes the same item, never for endless, random or garden crafts. Null otherwise.
+    /// </summary>
+    internal static string QueueOutput(IReadOnlyList<CraftElementBase> queue, CraftElementBase element, WgoData wgo)
+    {
+        try
+        {
+            if (queue == null || element == null) return null;
+            if (!CraftQueueOutputIndicator.TryGetQueueCount(queue, element, wgo, out var crafts)) return null;
+
+            // The hint counts crafts; what each makes is resolved by the same private test.
+            var args = new object[] { element, wgo, null, 0 };
+            if (QueueOutputResolve?.Invoke(null, args) is true && args[2] is string id && args[3] is int each && each > 0)
+                return Loc.Fmt("craft.queue_output", crafts * each, ItemText.Name(id));
+            return Loc.Fmt("craft.queue_output_crafts", crafts);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log?.LogWarning($"[Craft] Could not read the queue's total output: {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>The recipe's own name, falling back to what it makes - some recipes have no text of their own.</summary>

@@ -227,6 +227,16 @@ internal static class BuildingReader
                 return;
             }
 
+            // "Verschieben" (1.011): the same kind of cursor, picking what to lift.
+            if (buildData != null && buildData.IsMoveSelection)
+            {
+                _removables = null;
+                var count = Removables().Count;
+                Log?.LogInfo($"[Build] Move mode, {count} movable building(s) here.");
+                ScreenReader.Say(Loc.Fmt("build.move_mode_on", count));
+                return;
+            }
+
             var name = BuildingName(buildData);
             Log?.LogInfo($"[Build] Placement mode for '{buildData?.WgoId}'.");
             var line = Loc.Fmt("build.mode_on", name);
@@ -266,7 +276,7 @@ internal static class BuildingReader
 
             if (InputLocked(_controller)) return true;
 
-            if (IsRemoveMode)
+            if (IsSelectMode)
             {
                 UpdateRemove();
                 return true;
@@ -309,15 +319,29 @@ internal static class BuildingReader
     /// </summary>
     private static bool IsRemoveMode => CurrentBuild(_controller)?.BuildingMode == BuildingDef.BuildingMode.Remove;
 
+    /// <summary>
+    /// Move mode's first step (1.011): the same selection cursor as remove mode
+    /// (<c>BuildObjectSelectionPointer</c>), so the same keys pick what to lift. Its second step
+    /// is ordinary placement with the lifted building on the pointer.
+    /// </summary>
+    private static bool IsMoveSelection => CurrentBuild(_controller)?.IsMoveSelection == true;
+
+    private static bool IsMovePlacement => CurrentBuild(_controller)?.IsMovePlacement == true;
+
+    private static bool IsSelectMode => IsRemoveMode || IsMoveSelection;
+
     private static List<Wgo> _removables;
     private static int _removableIndex = -1;
 
-    private static readonly AccessTools.FieldRef<RemovePointer, HashSet<IBuildRemovable>> Undestroyable =
-        AccessTools.FieldRefAccess<RemovePointer, HashSet<IBuildRemovable>>("unDestroyableRemovables");
+    // 1.011 moved remove mode's cursor into BuildObjectSelectionPointer, shared with move mode;
+    // the selection is now per pointer, no longer static.
+    private static readonly FieldInfo RemovingSelection = AccessTools.Field(typeof(BuildObjectSelectionPointer), "currentSelection");
+    private static readonly MethodInfo CanSelect = AccessTools.Method(typeof(BuildObjectSelectionPointer), "CanSelect");
+    private static readonly MethodInfo UpdateHover = AccessTools.Method(typeof(BuildObjectSelectionPointer), "UpdateHoverFromOverlapCenter");
+    private static readonly MethodInfo SnappedOverlapCenter = AccessTools.Method(typeof(BuildObjectSelectionPointer), "GetSnappedOverlapCenter");
 
-    private static readonly FieldInfo RemovingSelection = AccessTools.Field(typeof(RemovePointer), "currentRemovingSelection");
-    private static readonly MethodInfo UpdateHover = AccessTools.Method(typeof(RemovePointer), "UpdateHoverFromOverlapCenter");
-    private static readonly MethodInfo SnappedOverlapCenter = AccessTools.Method(typeof(RemovePointer), "GetSnappedOverlapCenter");
+    private static BuildObjectSelectionPointer SelectionPointer() =>
+        _controller == null ? null : Pointer(_controller)?.PointerObject as BuildObjectSelectionPointer;
     private static readonly MethodInfo UpdatePointerAtPos = AccessTools.Method(typeof(BuildController), "UpdatePointerAtPos");
 
     private static void UpdateRemove()
@@ -329,10 +353,17 @@ internal static class BuildingReader
             StepRemovable(back ? -1 : 1);
         else if (Input.GetKeyDown(KeyCode.PageUp)) StepRemovable(-1);
         else if (Input.GetKeyDown(KeyCode.Home) || Input.GetKeyDown(KeyCode.F8)) SayRemoveSelection(interrupt: true);
-        else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) RemoveSelected();
+        else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+        {
+            if (IsMoveSelection) LiftSelected();
+            else RemoveSelected();
+        }
     }
 
-    /// <summary>Removable buildings in the zone, nearest the player first - what the game would tint red under its cursor.</summary>
+    /// <summary>
+    /// Buildings in the zone the cursor can pick, nearest the player first - what the game would
+    /// tint under its cursor: removable ones in remove mode, movable ones in move mode.
+    /// </summary>
     private static List<Wgo> Removables()
     {
         var result = new List<Wgo>();
@@ -341,13 +372,16 @@ internal static class BuildingReader
             var zone = LazySingleton<BuildManager>.Instance?.WorldZone;
             if (zone?.Wgos == null) return result;
 
-            var pointer = Pointer(_controller)?.PointerObject as RemovePointer;
-            var blocked = pointer == null ? null : Undestroyable(pointer);
+            var pointer = SelectionPointer();
+            var moving = IsMoveSelection;
             foreach (var wgo in zone.Wgos)
             {
-                if (wgo == null || wgo.Data == null || !wgo.IsBuildRemovable()) continue;
-                if (blocked != null && blocked.Contains(wgo)) continue;
-                result.Add(wgo);
+                if (wgo == null || wgo.Data == null) continue;
+                // The pointer's own rule, blocked buildings included; without a pointer the bare test.
+                var selectable = pointer != null && CanSelect != null
+                    ? CanSelect.Invoke(pointer, new object[] { wgo }) is true
+                    : moving ? wgo.IsBuildMovable() : wgo.IsBuildRemovable();
+                if (selectable) result.Add(wgo);
             }
 
             var from = MainGame.PlayerController != null ? MainGame.PlayerController.MovablePosition : Vector3.zero;
@@ -371,7 +405,7 @@ internal static class BuildingReader
 
         if (_removables.Count == 0)
         {
-            ScreenReader.Say(Loc.Get("build.remove_none"));
+            ScreenReader.Say(Loc.Get(IsMoveSelection ? "build.move_none" : "build.remove_none"));
             return;
         }
 
@@ -430,7 +464,7 @@ internal static class BuildingReader
     /// </summary>
     private static bool PointAt(Wgo target)
     {
-        var pointer = Pointer(_controller)?.PointerObject as RemovePointer;
+        var pointer = SelectionPointer();
         var spots = new List<Vector3>();
         foreach (var col in target.GetComponentsInChildren<Collider>())
         {
@@ -480,32 +514,71 @@ internal static class BuildingReader
             }
             if (ReferenceEquals(SelectedRemovable() as Wgo, target)) return true;
         }
-        return false;
+        return pointer != null && ForceSelect(pointer, target);
+    }
+
+    private static readonly FieldInfo RemovingRect = AccessTools.Field(typeof(BuildObjectSelectionPointer), "currentSelectionRect");
+    private static readonly MethodInfo SelectionChanged = AccessTools.Method(typeof(BuildObjectSelectionPointer), "OnSelectionChanged");
+    private static readonly FieldInfo RemoveFixedUpdate = AccessTools.Field(typeof(BuildObjectSelectionPointer), "doFixedUpdate");
+    private static readonly MethodInfo RemoveRectForWgo = AccessTools.Method(typeof(BuildObjectSelectionPointer), "GetRectForWgo");
+    private static readonly MethodInfo RemoveSelectionRect = AccessTools.Method(typeof(BuildObjectSelectionPointer), "UpdateSelectionRect");
+
+    /// <summary>
+    /// Selects a building the hover test cannot reach: a garden sign stands inside or against its
+    /// bed, and the game's tiny snapped test box always finds the bed (user, 2026-10-29: signs could
+    /// not be torn down). Sets what <c>UpdateHoverFromOverlapCenter</c> would set, then stops the
+    /// pending physics-step hover from putting the bed back.
+    /// </summary>
+    private static bool ForceSelect(BuildObjectSelectionPointer pointer, Wgo target)
+    {
+        try
+        {
+            RemovingSelection.SetValue(pointer, target);
+            RemovingRect?.SetValue(pointer, RemoveRectForWgo?.Invoke(pointer, new object[] { target }) ?? Rect.zero);
+            // Remove mode keeps the building's definition here, for what runs after removal.
+            SelectionChanged?.Invoke(pointer, new object[] { target });
+            RemoveFixedUpdate?.SetValue(pointer, false);
+            RemoveSelectionRect?.Invoke(pointer, null);
+            Log?.LogInfo($"[Build] Selection cursor selected '{target.Data.id}' directly; the hover test kept finding something else.");
+            return ReferenceEquals(SelectedRemovable() as Wgo, target);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not select '{target.Data.id}': {ex.Message}");
+            return false;
+        }
     }
 
     private static IBuildRemovable SelectedRemovable()
     {
-        try { return RemovingSelection?.GetValue(null) as IBuildRemovable; }
+        try
+        {
+            var pointer = SelectionPointer();
+            return pointer == null ? null : RemovingSelection?.GetValue(pointer) as IBuildRemovable;
+        }
         catch { return null; }
     }
 
     /// <summary>"hardening bucket, marked for demolition, 2 of 5, 3 metres: 2 north".</summary>
     private static void SayRemoveSelection(bool interrupt)
     {
+        var moving = IsMoveSelection;
         var wgo = SelectedRemovable() as Wgo;
         if (wgo == null || wgo.Data == null)
         {
-            ScreenReader.Say(Loc.Get("build.remove_nothing_here"), interrupt);
+            ScreenReader.Say(Loc.Get(moving ? "build.move_nothing_here" : "build.remove_nothing_here"), interrupt);
             return;
         }
 
         var parts = new List<string> { ObjectNames.Of(wgo.Data.id) };
-        var marked = IsMarked(wgo);
+        var marked = !moving && IsMarked(wgo);
         if (marked) parts.Add(Loc.Get("build.remove_marked"));
         var extension = ObjectStatus.Extension(wgo.Data);
         if (extension != null) parts.Add(extension);
+        // Slot add-ons go with the building either way (MoveSelectPointer.CollectSelectionGroup).
         var goesWith = SlotAddOnsOf(wgo.Data);
-        if (goesWith.Count > 0) parts.Add(Loc.Fmt("build.remove_takes_addons", string.Join(", ", goesWith)));
+        if (goesWith.Count > 0)
+            parts.Add(Loc.Fmt(moving ? "build.move_takes_addons" : "build.remove_takes_addons", string.Join(", ", goesWith)));
         if (_removables != null && _removableIndex >= 0 && _removableIndex < _removables.Count && ReferenceEquals(_removables[_removableIndex], wgo))
             parts.Add(Loc.Fmt("build.remove_position", _removableIndex + 1, _removables.Count));
 
@@ -520,7 +593,7 @@ internal static class BuildingReader
         // A factory piece: what it is joined to, after where it is so stepping stays quick.
         var links = FactoryReader.PieceLinks(wgo.Data);
         if (links != null) parts.Add(links);
-        parts.Add(Loc.Get(marked ? "build.remove_key_unmark" : "build.remove_key"));
+        parts.Add(Loc.Get(moving ? "build.move_key" : marked ? "build.remove_key_unmark" : "build.remove_key"));
         ScreenReader.Say(string.Join(", ", parts), interrupt);
     }
 
@@ -580,6 +653,98 @@ internal static class BuildingReader
         }
 
         ScreenReader.Say(Loc.Fmt(IsMarked(wgo) ? "build.remove_now_marked" : "build.remove_now_unmarked", name));
+    }
+
+    // ---- move mode ("Verschieben", 1.011) -------------------------------------------------------
+
+    private static readonly MethodInfo SwitchToMovePlacement = AccessTools.Method(typeof(BuildController), "SwitchToMovePlacement");
+    private static readonly MethodInfo SwitchToMoveSelection = AccessTools.Method(typeof(BuildController), "SwitchToMoveSelection");
+
+    /// <summary>True while the mod itself switches between the two move steps and says so itself.</summary>
+    private static bool _ownSwitch;
+
+    /// <summary>
+    /// Lifts the selected building and goes on to placing it - what the game's build key does in
+    /// move mode (<c>BuildController.UpdateBuildModeInput</c>), which only the pointer's half of
+    /// goes through <c>TryBuildActionInput</c>.
+    /// </summary>
+    private static void LiftSelected()
+    {
+        var wgo = SelectedRemovable() as Wgo;
+        if (wgo == null || wgo.Data == null)
+        {
+            ScreenReader.Say(Loc.Get("build.move_nothing_here"));
+            return;
+        }
+
+        var name = ObjectNames.Of(wgo.Data.id);
+        var id = wgo.Data.id;
+        if (!Pointer(_controller).TryBuildActionInput() || BuildMoveHelper.ActiveMove == null)
+        {
+            Log?.LogInfo($"[Build] Move: '{id}' could not be lifted.");
+            ScreenReader.Say(Loc.Fmt("build.move_lift_failed", name));
+            return;
+        }
+
+        Log?.LogInfo($"[Build] Move: lifted '{id}'.");
+        _removables = null;
+        _spots = null;
+        _ownSwitch = true;
+        try { SwitchToMovePlacement?.Invoke(_controller, new object[] { BuildMoveHelper.ActiveMove }); }
+        finally { _ownSwitch = false; }
+        ScreenReader.Say(Loc.Fmt("build.move_lifted", name));
+    }
+
+    /// <summary>
+    /// The game swapped the pointer between choosing and placing - by its own keys too: Escape
+    /// while placing puts the building back and returns to choosing.
+    /// </summary>
+    [HarmonyPatch(typeof(BuildController), "SwitchBuildPointer")]
+    [HarmonyPostfix]
+    private static void BuildController_SwitchBuildPointer(BuildController __instance, BuildData buildData)
+    {
+        _controller = __instance;
+        _spots = null;
+        _removables = null;
+        if (_ownSwitch || buildData == null) return;
+        try
+        {
+            if (buildData.IsMoveSelection)
+            {
+                Log?.LogInfo("[Build] Back to choosing what to move.");
+                ScreenReader.Say(Loc.Fmt("build.move_back", Removables().Count));
+            }
+            else if (buildData.IsMovePlacement)
+            {
+                Log?.LogInfo($"[Build] Placing moved '{buildData.WgoId}'.");
+                ScreenReader.Say(Loc.Fmt("build.move_lifted", BuildingName(buildData)));
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.LogError($"[Build] Move announcement failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    // 1.011 labels the menu's Move entry with "move_basic", which has no German text yet and falls
+    // back to English. Use the mod's own word so the entry is read (and shown) in the player's language.
+    private static readonly MethodInfo SetWidgetName = AccessTools.PropertySetter(typeof(UIBuildingWidgetData), "Name");
+
+    [HarmonyPatch(typeof(UIBuildingWidgetData), MethodType.Constructor,
+        new[] { typeof(BuildData), typeof(MultiInventory), typeof(Action<BuildData, List<NeedItemData>>),
+                typeof(Func<BuildData, List<NeedItemData>, bool>), typeof(Action), typeof(Action), typeof(WorldZoneData) })]
+    [HarmonyPostfix]
+    private static void UIBuildingWidgetData_Ctor(UIBuildingWidgetData __instance, BuildData buildData)
+    {
+        try
+        {
+            if (buildData != null && buildData.IsMoveSelection)
+                SetWidgetName?.Invoke(__instance, new object[] { Loc.Get("build.move_name") });
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not name the Move entry: {ex.Message}");
+        }
     }
 
     private static void Step(int dx, int dz)
@@ -1345,28 +1510,44 @@ internal static class BuildingReader
             var parents = ParentWorkbenches(extension, playerPos);
             Log?.LogInfo($"[Build] Add-on '{extension}': {parents.Count} workbench(es) to stand against.");
 
+            // Rings round each workbench's footprint edge, all workbenches ring by ring. Square rings
+            // from the centre spent the whole try budget on the nearest one: a cabbage sign tried
+            // 2500 spots round one bed and never reached the six other beds (log of 2026-10-29).
             var grid = GridStep(_controller);
             var sx = Mathf.Max(0.1f, 0.04f * grid.x);
             var sz = Mathf.Max(0.1f, 0.05f * grid.y);
-            var rings = Mathf.Min(40, Mathf.CeilToInt(4f / Mathf.Min(sx, sz)));
-            foreach (var parent in parents)
+            var step = Mathf.Min(sx, sz);
+            var feet = parents.Select(p => Footprint(p.GetComponentsInChildren<Collider>())
+                                           ?? new Bounds(p.Data.Position, new Vector3(1f, 1f, 1f))).ToList();
+            for (var d = -0.2f; d <= 2f; d += step)
+            for (var k = 0; k < parents.Count; k++)
             {
-                var origin = new Vector3(parent.Data.Position.x, start.y, parent.Data.Position.z);
-                for (var r = 1; r <= rings; r++)
-                for (var i = -r; i <= r; i++)
-                for (var j = -r; j <= r; j++)
+                var fp = feet[k];
+                float x0 = fp.min.x - d, x1 = fp.max.x + d, z0 = fp.min.z - d, z1 = fp.max.z + d;
+                if (x1 <= x0 || z1 <= z0) continue;
+                for (var x = x0; x <= x1 + 0.001f; x += sx)
                 {
-                    if (Mathf.Abs(i) != r && Mathf.Abs(j) != r) continue;
-                    candidates.Add(origin + new Vector3(i * sx, 0f, j * sz));
+                    candidates.Add(new Vector3(x, start.y, z0));
+                    candidates.Add(new Vector3(x, start.y, z1));
+                }
+                for (var z = z0 + sz; z < z1 - 0.001f; z += sz)
+                {
+                    candidates.Add(new Vector3(x0, start.y, z));
+                    candidates.Add(new Vector3(x1, start.y, z));
                 }
             }
 
             var linked = new List<Vector3>();
             var tally = new Dictionary<string, int>();
             var tried = 0;
+            var seen = new HashSet<Vector2Int>();
+            var shift = Pointer(_controller).ShiftToVisualCenter;
             foreach (var c in candidates)
             {
-                if (++tried > 2500 || linked.Count >= 8) break;
+                if (tried >= 2500 || linked.Count >= 8) break;
+                var snapped = VisualConsts.GetRoundedPosXZ(c - shift, grid);
+                if (!seen.Add(new Vector2Int(Mathf.RoundToInt(snapped.x * 1000f), Mathf.RoundToInt(snapped.z * 1000f)))) continue;
+                tried++;
                 var free = MoveTo(c);
                 var hosts = ConnectedHosts(extension);
                 if (hosts.Count == 0) continue;
@@ -1386,6 +1567,7 @@ internal static class BuildingReader
             _spotsCompromised = false;
             var ranked = tally.OrderByDescending(kv => kv.Value).ToList();
             _inTheWay = ranked.Select(kv => kv.Key).ToList();
+            Log?.LogInfo($"[Build] Add-on search tried {tried} spot(s) of {candidates.Count} point(s).");
             Log?.LogInfo($"[Build] In the way of '{extension}': " +
                          (ranked.Count == 0 ? "nothing found" : string.Join(", ", ranked.Select(kv => $"{kv.Key} x{kv.Value}"))) + ".");
             return linked;
@@ -1862,10 +2044,27 @@ internal static class BuildingReader
         var slotState = PlacingSlotBlockers();
         if (slotState != null)
             Log?.LogInfo($"[Build] Add-on slots at the spot: {(slotState.Count == 0 ? "free" : "blocked by " + string.Join(", ", slotState))}.");
+        var moving = IsMovePlacement;
         FactoryReader.BeginBuild();
         if (!pointer.TryBuildActionInput())
         {
             ScreenReader.Say(Loc.Get("build.failed"));
+            return;
+        }
+
+        if (moving)
+        {
+            // Set down; the game's own build key goes back to choosing here, so the mod does too.
+            Log?.LogInfo($"[Build] Moved '{CurrentBuild(_controller)?.WgoId}' to {CurPos(_controller)}.");
+            _spots = null;
+            _ownSwitch = true;
+            try
+            {
+                if (BuildMoveHelper.ActiveMove == null) SwitchToMoveSelection?.Invoke(_controller, null);
+            }
+            finally { _ownSwitch = false; }
+            var moved = FactoryReader.BuiltLinks();
+            ScreenReader.Say(moved == null ? Loc.Fmt("build.moved", name) : $"{Loc.Fmt("build.moved", name)}. {moved}");
             return;
         }
 
@@ -1954,6 +2153,8 @@ internal static class BuildingReader
     {
         if (data == null) return "";
         if (data.BuildingMode == BuildingDef.BuildingMode.Remove) return TmpText.Clean(LLBase.L("remove"));
+        if (data.IsMovePlacement && data.WgoId != null) return ObjectNames.Of(data.WgoId);
+        if (data.IsMoveSelection) return Loc.Get("build.move_name");
         return TmpText.Clean(LLBase.L(data.Definition?.id ?? data.WgoId));
     }
 }

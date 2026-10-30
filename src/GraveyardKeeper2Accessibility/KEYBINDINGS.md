@@ -189,8 +189,9 @@ four slots hold. Arrows choose a slot, **Enter** or **1 – 4** puts the item th
 the hotbar unchanged.
 
 **How many? window** (moving, selling or buying part of a stack): says the item, the amount and the
-most you can take — and the price at a vendor. Left / Right arrow (or A / D) change the amount, Up
-(or W) jumps to the most, Down (or S) to the least; each change is spoken. Enter (or E) confirms,
+most you can take — and the price at a vendor. Left / Right arrow (or A / D) change the amount,
+Page up / Page down change it by 10 (the controller's bumpers), Up (or W) jumps to the most, Down
+(or S) to the least; each change is spoken. Enter (or E) confirms,
 Escape (or Q) cancels.
 
 **Controls screen** (pause menu → Controls): says how many actions there are and the first one.
@@ -368,6 +369,14 @@ end, or one nothing feeds; Ctrl+Shift+Space goes back), and every factory piece 
 joined to: which way a belt runs, where its items come from and go to, and what lies on it. Most buildings are not removed at once but *marked for demolition*: leave
 remove mode, walk to it (the object list says "marked for demolition") and knock it down with F. Enter
 on a marked building takes the mark back off.
+
+**Move mode ("Move" in the building menu):** first choose what to move with the same keys as remove
+mode — Space, End or Page down goes to the next building that can be moved, nearest first (Shift+Space
+or Page up goes back), Home says the selected one, and add-ons in its slots are named because they
+move along with it. Enter picks it up. Then place it like a new building: arrow keys move one square,
+Space or End jumps to the next free spot, Home says where, R rotates, Enter sets it down. After that
+you choose the next one. Escape while placing puts the building back where it was; Escape again
+leaves move mode.
 
 **Cutscenes and dialogue move on with E** — the game's own key, the same one you use to interact.
 The mod adds nothing here.

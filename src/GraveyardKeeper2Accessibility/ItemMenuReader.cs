@@ -114,6 +114,58 @@ internal static class ItemMenuReader
         if (__state != null) Say(Loc.Fmt("itemmenu.destroyed", __state));
     }
 
+    /// <summary>The frame a move between two inventories was refused for lack of room, so "moved" is not said.</summary>
+    internal static int RefusedFrame = -1;
+
+    // With a bag open, the game moves items through a handler marked Silent, which also mutes its
+    // "inventory full" notice - a move into a full bag made no sound and said nothing (user,
+    // 2026-10-29). A full chest never had a notice; only the player's own inventory has one.
+    [HarmonyPatch(typeof(InventoryUIItemMoveOpHandler), "TryMoveItem")]
+    [HarmonyPostfix]
+    private static void TryMoveItem_Postfix(InventoryUIItemMoveOpHandler __instance, UIItemCell itemCell, Inventory to, bool __result)
+    {
+        if (__result) return;
+        try
+        {
+            SayRefused(__instance, itemCell?.DisplayingItem, to);
+        }
+        catch { /* then nothing is said, as before */ }
+    }
+
+    // A whole stack asks "how many?" first; when not even one fits, that window never opens.
+    [HarmonyPatch(typeof(InventoryUIItemMoveOpHandler), "OpenItemCountWindow")]
+    [HarmonyPrefix]
+    private static void OpenItemCountWindow_Prefix(InventoryUIItemMoveOpHandler __instance, UIItemCell itemCell, Inventory to, Item ___ignoreBagWhenAdd)
+    {
+        try
+        {
+            var item = itemCell?.DisplayingItem;
+            if (item == null || to?.Data == null) return;
+            if (to.Data.CanAddItemCountToInventory(item.Definition, 1, considerEmptySlots: true, item.IsBag ? null : ___ignoreBagWhenAdd) > 0) return;
+            SayRefused(__instance, item, to);
+        }
+        catch { /* then nothing is said, as before */ }
+    }
+
+    private static void SayRefused(InventoryUIItemMoveOpHandler handler, Item item, Inventory to)
+    {
+        if (item == null || item.IsEmpty || to?.Data == null) return;
+        RefusedFrame = Time.frameCount;
+
+        var player = MainGame.PlayerData?.Inventory;
+        if (to == player && !handler.Silent) return; // the game's own notice speaks (WorldAnnouncer)
+
+        var name = ItemText.Name(item.id);
+        string text;
+        if (to == player) text = Loc.Get("world.inventory_full");
+        else if (to.Data.IsBag && item.Definition != null && !item.Definition.CanBeInsertedInBag(to.Data.Definition))
+            text = Loc.Fmt("itemmenu.not_for_bag", name);
+        else if (to.Data.IsBag) text = Loc.Fmt("itemmenu.bag_full", name);
+        else text = Loc.Fmt("itemmenu.no_room", name);
+        Plugin.Log?.LogInfo($"[ItemMenu] Moving '{item.id}' into '{to.Data.id}' was refused.");
+        Say(text);
+    }
+
     private static void Say(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;

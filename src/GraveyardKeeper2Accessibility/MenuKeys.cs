@@ -94,6 +94,7 @@ internal static class MenuKeys
         // well would talk over the amount, and Space would try to move an item behind the window.
         if (ItemCountReader.IsActive)
         {
+            ItemCountReader.TryFastStep();
             _heldKey = KeyCode.None;
             return;
         }
@@ -148,6 +149,7 @@ internal static class MenuKeys
             _heldKey = KeyCode.None;
             return;
         }
+        PickerNav.Settle(controller);
 
         if (enter)
         {
@@ -184,7 +186,8 @@ internal static class MenuKeys
     {
         UiNarrator.ArrowPressed();
         if (CraftReader.TryArrow(direction) || StationsReader.TryArrow(direction) ||
-            BodyWindowsReader.TryArrow(controller, direction) || ChestButtons.TryArrow(controller, direction)) return;
+            BodyWindowsReader.TryArrow(controller, direction) || ChestButtons.TryArrow(controller, direction) ||
+            PickerNav.TryArrow(controller, direction)) return;
         controller.Navigate(direction);
     }
 
@@ -246,6 +249,8 @@ internal static class MenuKeys
                 _log?.LogInfo($"[Keys] Moving item '{item.id}' x{count} asks how many.");
                 return true;
             }
+            // No room on the other side: that has been said already, and "moved" would be untrue.
+            if (ItemMenuReader.RefusedFrame == Time.frameCount) return true;
             _log?.LogInfo($"[Keys] Moved item '{item.id}' x{count}.");
 
             // In a station's picker slot (alchemy, study table, garden bed) the second action takes

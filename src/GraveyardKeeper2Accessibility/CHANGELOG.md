@@ -1,3 +1,30 @@
+## 0.2.1
+
+Updated for the game's patch 1.011.
+
+* **Remove mode works again.** The patch changed how the game selects what to remove, which broke
+the mod's remove mode.
+* **Buildings can be moved.** The new Move entry in the build menu works like remove mode: Space or
+End goes to the next building that can be moved, Shift back, Home says the selection, and Enter
+picks it up. Then it is placed like a new building, with the arrow keys or Space and End for the
+next free spot, R to rotate and Enter to set it down. Add-ons move along with it, and Escape puts
+it back where it was. After setting one down you choose the next building to move. In German the
+entry is called "Verschieben" instead of the game's untranslated "Move".
+* **The total of the whole crafting queue is read out**, as the game now shows it: "whole queue
+makes 30 iron bars" when more than one queued craft makes the same item. You hear it in a
+station's status in the object list, in the station window's summary and on each queue entry.
+* **Page up and Page down change the amount by 10** in the "how many?" window, like the
+controller's bumpers since the patch.
+* **Item pickers only stop on what you can choose.** Picking a seed, fertilizer, alchemy ingredient,
+organ, grave decoration, offering or zombie equipment used to go through everything you carry and
+every empty slot. Now the arrows go from one fitting item to the next, the picker opens on the first
+one, and says "Nothing here fits" when there is none.
+* **A full bag is announced.** Putting something into a full bag said nothing; now you hear that the
+bag is full, that the item cannot go into this kind of bag, or that a chest has no room. Space no
+longer says "moved" when nothing moved.
+* **One error no longer switches off all keys.** A single failure while a key was handled (opening a
+bag with another mod installed) left the arrows dead until the game was restarted.
+
 ## 0.2.0
 
 * **Bugs can be reported to the developers.** The "Report a bug" window in the menu could be heard

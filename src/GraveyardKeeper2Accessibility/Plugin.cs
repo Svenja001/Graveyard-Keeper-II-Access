@@ -17,6 +17,7 @@ public class Plugin : BaseUnityPlugin
     private ConfigEntry<KeyboardShortcut> _repeatKey;
     private bool _greeted;
     private bool _keysWork = true;
+    private int _keyFailures;
 
     private void Awake()
     {
@@ -269,41 +270,52 @@ public class Plugin : BaseUnityPlugin
 
         try
         {
-            // Placement mode claims the arrows, Enter, Space, Home and End for its cursor.
-            if (BuildingReader.UpdatePlacement()) return;
-
-            // The controls screen reads its own keys - all of them while waiting for a new one.
-            if (BindingsReader.Update()) return;
-
-            // The bug report window claims every key while open, so letters typed into it do not
-            // also fire the mod's own keys.
-            if (BugReportReader.Ready && BugReportReader.Update(_repeatKey.Value.IsDown())) return;
-
-            if (MilitaryReader.UpdateKeys()) return;
-
-            // The quest list (J) claims Up, Down and Enter while it is open; it closes on any window.
-            if (QuestReader.Update()) return;
-
-            MenuKeys.Update();
-            Navigator.Update();
-            AutoWalk.Update();
-            Rescue.Update();
-            StatusKeys.Update();
-            FactoryReader.Update();
-
-            if (_repeatKey.Value.IsDown() && !NotesReader.TryRepeat() && !BodyWindowsReader.TryRepeat() && !ChestButtons.TryRepeat() &&
-                !CraftReader.TryRepeat() && !StationsReader.TryRepeat() && !TreesReader.TryRepeat() &&
-                !BindingsReader.TryRepeat() && !VendorReader.TryRepeat() && !TravelMapReader.TryRepeat())
-                UiNarrator.RepeatFocus();
+            UpdateKeys();
+            _keyFailures = 0;
         }
         catch (Exception ex)
         {
             // Unity 6 can ship with the legacy input backend disabled, in which case reading a
-            // key throws every frame. Give up on keys only - not on Update, which still owes the
-            // player the greeting and will owe it more later.
-            Log.LogError($"Key handling failed, disabling the mod's keys: {ex.GetType().Name}: {ex.Message}");
+            // key throws every frame. Give up on keys only then - not on one throw from a game call
+            // a key made: Enter on a bag in the character window threw once and left the arrows
+            // dead until restart (log of 2026-10-29). Update still owes the greeting either way.
+            if (++_keyFailures == 1)
+                Log.LogError($"Key handling failed: {ex}");
+            if (_keyFailures < 30) return;
+            Log.LogError($"Key handling failed {_keyFailures} frames in a row, disabling the mod's keys.");
             _keysWork = false;
         }
+    }
+
+    private void UpdateKeys()
+    {
+        // Placement mode claims the arrows, Enter, Space, Home and End for its cursor.
+        if (BuildingReader.UpdatePlacement()) return;
+
+        // The controls screen reads its own keys - all of them while waiting for a new one.
+        if (BindingsReader.Update()) return;
+
+        // The bug report window claims every key while open, so letters typed into it do not
+        // also fire the mod's own keys.
+        if (BugReportReader.Ready && BugReportReader.Update(_repeatKey.Value.IsDown())) return;
+
+        if (MilitaryReader.UpdateKeys()) return;
+
+        // The quest list (J) claims Up, Down and Enter while it is open; it closes on any window.
+        if (QuestReader.Update()) return;
+
+        MenuKeys.Update();
+        // The "how many?" window steps by 10 on Page up/down, the object list's keys.
+        if (!ItemCountReader.IsActive) Navigator.Update();
+        AutoWalk.Update();
+        Rescue.Update();
+        StatusKeys.Update();
+        FactoryReader.Update();
+
+        if (_repeatKey.Value.IsDown() && !NotesReader.TryRepeat() && !BodyWindowsReader.TryRepeat() && !ChestButtons.TryRepeat() &&
+            !CraftReader.TryRepeat() && !StationsReader.TryRepeat() && !TreesReader.TryRepeat() &&
+            !BindingsReader.TryRepeat() && !VendorReader.TryRepeat() && !TravelMapReader.TryRepeat())
+            UiNarrator.RepeatFocus();
     }
 
     private void OnDestroy()
