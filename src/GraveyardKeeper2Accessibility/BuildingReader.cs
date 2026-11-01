@@ -985,8 +985,12 @@ internal static class BuildingReader
     /// </summary>
     private static List<string> SlotOccupants(BuildArea slot, Wgo owner, Wgo target, BuildingDef def)
     {
+        return SlotBounds(slot) is Bounds b ? Occupants(b, owner, target, def) : new List<string>();
+    }
+
+    private static List<string> Occupants(Bounds b, Wgo owner, Wgo target, BuildingDef def)
+    {
         var names = new List<string>();
-        if (!(SlotBounds(slot) is Bounds b)) return names;
         var half = Vector3.Max(Vector3.zero, b.extents - VisualConsts.XYZ_STEP);
         var hits = new Collider[20];
         var count = Physics.OverlapBoxNonAlloc(b.center, half, hits, Quaternion.identity, 590080);
@@ -1403,6 +1407,9 @@ internal static class BuildingReader
     /// <summary>Corners of the marked areas last searched, for offering packed spots first.</summary>
     private static readonly List<Vector3> AreaCorners = new();
 
+    /// <summary>The marked areas last searched, for saying what stands on them when none had room.</summary>
+    private static readonly List<BuildArea> SearchedAreas = new();
+
     /// <summary>
     /// How finely <see cref="AddMarkedAreas"/> covers each area: 0 the centres only, 1 a 3 × 3
     /// spread, 2 every build-grid cell. Each pass runs only when the one before found nothing:
@@ -1433,11 +1440,21 @@ internal static class BuildingReader
             if (col == null || !InZone(col.bounds.center)) continue;
             if (!area.isActiveAndEnabled || !col.enabled)
             {
+                // Where they are and what owns them, to learn what switches them off: in the
+                // garden 3 of 6 bed places were, with no upgrade left to buy (user, 2026-10-31).
+                if (pass == 0)
+                {
+                    var owner = area.transform.parent != null ? area.transform.parent.name : "-";
+                    Log?.LogInfo($"[Build] Switched-off area '{areaId}' at ({col.bounds.center.x:0.00}, {col.bounds.center.z:0.00}), " +
+                                 $"under '{owner}', object {(area.gameObject.activeInHierarchy ? "on" : "off")}, collider {(col.enabled ? "on" : "off")}.");
+                }
                 inactive++;
                 continue;
             }
             areas.Add(area);
         }
+        SearchedAreas.Clear();
+        SearchedAreas.AddRange(areas);
 
         // The centre, then every build-grid cell over the area and a metre around it. A Soft area
         // (the barracks barricades) needs every cell of the building on it, and the barracks area
@@ -1494,6 +1511,7 @@ internal static class BuildingReader
         var candidates = new List<Vector3>();
         var def = CurrentBuild(_controller)?.Definition;
         AreaCorners.Clear();
+        SearchedAreas.Clear();
 
         _spotsExact = false;
         _coverHint = null;
@@ -1578,6 +1596,10 @@ internal static class BuildingReader
 
         var marked = def != null && !string.IsNullOrEmpty(def.customBuildAreaId) && zone != null && zone.ZoneCollider != null;
         var reserved = ReservedBands();
+        _freePlaces = null;
+        var places = FreePlaces();
+        if (places.Count > 0)
+            Log?.LogInfo($"[Build] Keeping {places.Count} free marked place(s) for other buildings: {string.Join(", ", places.Select(p => $"{p.Name} at ({p.Area.center.x:0.00}, {p.Area.center.z:0.00})"))}.");
         var placingParent = TakesAddOns(CurrentBuild(_controller));
         if (placingParent && Pointer(_controller)?.PointerObject is WgoBuildPointer slotPointer)
         {
@@ -1594,7 +1616,7 @@ internal static class BuildingReader
             candidates.Clear();
             if (marked) AddMarkedAreas(def.customBuildAreaId, zone, candidates, pass);
             var noAreas = candidates.Count == 0;
-            CheckSpots(candidates, start, playerPos, zone, def, reserved, placingParent, result, fallback);
+            CheckSpots(candidates, start, playerPos, zone, def, reserved, places, placingParent, result, fallback);
             if (noAreas || pass + 1 >= AreaPasses) break;
             // Only spots that fail the add-on rules so far: look finer before settling for them (a
             // furnace on the yard found one spot at the area centres, its bellows slot blocked).
@@ -1608,9 +1630,21 @@ internal static class BuildingReader
         Log?.LogInfo($"[Build] {reserved.Count} workbench(es) keeping room for an add-on; placing one that takes add-ons: {placingParent}; {fallback.Count} spot(s) set aside.");
         MoveTo(start);
 
-        // Nothing found on a marked area: the free room may only fit the building turned.
+        // Nothing found on a marked area: the free room may only fit the building turned - unless
+        // something stands on every area. A chest on the second confession place in the church
+        // left Beichtstuhl III with "no free spot" and nothing to say why (user, 2026-10-31).
         if (result.Count == 0 && fallback.Count == 0 && def != null && !string.IsNullOrEmpty(def.customBuildAreaId))
-            _coverHint = Loc.Get("build.cover_turn");
+        {
+            _coverHint = TakenAreasText(def);
+            if (_coverHint == null)
+            {
+                var blockers = BareAreaBlockers(def);
+                MoveTo(start);
+                _coverHint = blockers.Count > 0
+                    ? Loc.Fmt("build.in_the_way_long", Loc.Get("build.no_free_spot"), string.Join(", ", blockers))
+                    : Loc.Get("build.cover_turn");
+            }
+        }
 
         // A factory piece: spots where it would join what already stands come first, the most
         // links first (user, 2026-10-24: "should always first offer spots that can link").
@@ -1716,10 +1750,12 @@ internal static class BuildingReader
     /// <summary>
     /// Puts the pointer on each candidate, nearest the player first, and adds the green ones to
     /// <paramref name="result"/>, or to <paramref name="fallback"/> when they fail only the add-on
-    /// room tests. With no candidates, searches rings around the player.
+    /// room tests or would cover another building's free place. With no candidates, searches rings
+    /// around the player.
     /// </summary>
     private static void CheckSpots(List<Vector3> candidates, Vector3 start, Vector3 playerPos, WorldZone zone, BuildingDef def,
-        List<(Wgo Owner, Bounds Band)> reserved, bool placingParent, List<Vector3> result, List<Vector3> fallback)
+        List<(Wgo Owner, Bounds Band)> reserved, List<(string Name, Bounds Area)> places, bool placingParent,
+        List<Vector3> result, List<Vector3> fallback)
     {
         if (candidates.Count == 0)
         {
@@ -1760,7 +1796,7 @@ internal static class BuildingReader
             var at = CursorGround();
             if (result.Exists(s => Flat(s - at).sqrMagnitude < minGap * minGap)) continue;
 
-            if (ReservedBy(reserved) != null || (placingParent && !HasRoomForAddOn()))
+            if (ReservedBy(reserved) != null || PlaceTakenFor(places) != null || (placingParent && !HasRoomForAddOn()))
             {
                 if (fallback.Count < wanted && !fallback.Exists(s => Flat(s - at).sqrMagnitude < 1f)) fallback.Add(at);
                 continue;
@@ -1773,6 +1809,63 @@ internal static class BuildingReader
 
     /// <summary>Said instead of "no free spot" when the free areas need the building turned.</summary>
     private static string _coverHint;
+
+    /// <summary>
+    /// "No room left on the 2 places for this. On them: Beichtstuhl III, Einfache Kiste" when
+    /// something stands on every marked area last searched; null when one is bare, so the room it
+    /// has may only need the building turned. The areas are flat at the floor: the box goes 2 m up
+    /// from it to meet what stands there.
+    /// </summary>
+    private static string TakenAreasText(BuildingDef def)
+    {
+        if (SearchedAreas.Count == 0) return null;
+        var tally = new Dictionary<string, int>();
+        foreach (var area in SearchedAreas)
+        {
+            if (area == null || !(SlotBounds(area) is Bounds b)) return null;
+            var tall = new Bounds(new Vector3(b.center.x, b.min.y + 1f, b.center.z), new Vector3(b.size.x, 2f, b.size.z));
+            var names = Occupants(tall, null, null, def);
+            if (names.Count == 0) return null;
+            foreach (var name in names) tally[name] = tally.TryGetValue(name, out var n) ? n + 1 : 1;
+        }
+        var list = string.Join(", ", tally.Select(kv => kv.Value > 1 ? Loc.Fmt("build.taken_many", kv.Key, kv.Value) : kv.Key));
+        Log?.LogInfo($"[Build] Every one of {SearchedAreas.Count} marked area(s) has something on it: {string.Join(", ", tally.Select(kv => $"{kv.Key} x{kv.Value}"))}.");
+        return SearchedAreas.Count == 1
+            ? Loc.Fmt("build.place_taken", list)
+            : Loc.Fmt("build.places_taken", SearchedAreas.Count, list);
+    }
+
+    /// <summary>
+    /// What the game finds in the way on the marked areas that look bare, by the pointer put on
+    /// each one's centre. A chest was taken off the third bed place in the garden, nothing stood
+    /// on it any more, and still every one of 993 spots there was red - the mod could only say
+    /// "turn it" (user, 2026-10-31). The sizes are logged so a wrong turn shows too.
+    /// </summary>
+    private static List<string> BareAreaBlockers(BuildingDef def)
+    {
+        var names = new List<string>();
+        var zone = _controller?.CurrentWorldZone;
+        var rotation = Pointer(_controller)?.PointerObject is WgoBuildPointer wgoPointer && wgoPointer.Target != null
+            ? wgoPointer.Target.MainWgoPart.WgoPartData.rotationIndex : -1;
+        foreach (var area in SearchedAreas)
+        {
+            if (area == null || !(SlotBounds(area) is Bounds b)) continue;
+            var tall = new Bounds(new Vector3(b.center.x, b.min.y + 1f, b.center.z), new Vector3(b.size.x, 2f, b.size.z));
+            if (Occupants(tall, null, null, def).Count > 0) continue;
+
+            var centre = zone != null ? VisualConsts.ProjectElevationPointToGround(b.center, zone.GroundPlaneY) : b.center;
+            var free = MoveTo(centre);
+            var found = PointerBlockers(null);
+            var fp = PointerFootprint();
+            Log?.LogInfo($"[Build] Bare area at ({b.center.x:0.00}, {b.center.z:0.00}) size {b.size.x:0.00} x {b.size.z:0.00}; " +
+                         $"building {(fp == null ? "?" : $"{fp.Value.size.x:0.00} x {fp.Value.size.z:0.00} at ({fp.Value.center.x:0.00}, {fp.Value.center.z:0.00})")}, " +
+                         $"rotation {rotation}, area wants {(area.HasRotationRequirement ? area.RotationRequirement.ToString() : "any")}; " +
+                         $"free: {free}; in the way: {(found.Count == 0 ? "nothing found" : string.Join(", ", found))}.");
+            foreach (var name in found)
+                if (!names.Contains(name)) names.Add(name);
+        }
+        return names;
+    }
 
     /// <summary>
     /// Spots for a building whose area type is <c>FullCoverSoft</c> (the barracks barricades):
@@ -1938,6 +2031,81 @@ internal static class BuildingReader
         return result;
     }
 
+    /// <summary>
+    /// A marked area no larger than this is a place for one building (a confessional's 1.6 x 1.5 m,
+    /// a grave plot); larger ones are floors many buildings share and are not kept free.
+    /// </summary>
+    private const float PlaceMaxArea = 10f;
+
+    private static List<(string Name, Bounds Area)> _freePlaces;
+    private static float _freePlacesAt = -10f;
+
+    /// <summary>
+    /// The empty marked places in this zone that belong to other buildings - the user's rule: a chest
+    /// must not take one. A chest stood on the second confession place in the church, so the last
+    /// Beichtstuhl III could not be built and the church stayed at 186 of 201 (user, 2026-10-31).
+    /// Areas of the building being placed, add-on slots on workbenches (see
+    /// <see cref="ReservedBands"/>) and wide floors are left out. Kept a second, as the arrow keys
+    /// ask on every step.
+    /// </summary>
+    private static List<(string Name, Bounds Area)> FreePlaces()
+    {
+        if (_freePlaces != null && Time.unscaledTime - _freePlacesAt < 1f) return _freePlaces;
+        var result = new List<(string, Bounds)>();
+        try
+        {
+            var def = CurrentBuild(_controller)?.Definition;
+            var zone = _controller?.CurrentWorldZone;
+            var map = GameBalance.Me?.customBuildAreaIdToWgoIds;
+            if (zone != null && zone.ZoneCollider != null && map != null && PlacingExtension(CurrentBuild(_controller)) == null)
+            {
+                var bounds = zone.ZoneCollider.bounds;
+                foreach (var area in UnityEngine.Object.FindObjectsByType<BuildArea>(FindObjectsSortMode.None))
+                {
+                    if (area == null || string.IsNullOrEmpty(area.Id) || area.Id == def?.customBuildAreaId) continue;
+                    if (!map.TryGetValue(area.Id, out var ids) || ids == null || ids.Count == 0) continue;
+                    if (area.GetComponentInParent<Wgo>() != null) continue;
+                    var col = area.Collider != null ? area.Collider : area.GetComponent<Collider>();
+                    if (col == null || !col.enabled || !(SlotBounds(area) is Bounds b)) continue;
+                    if (!bounds.Contains(new Vector3(b.center.x, bounds.center.y, b.center.z))) continue;
+                    if (b.size.x * b.size.z > PlaceMaxArea) continue;
+                    var tall = new Bounds(new Vector3(b.center.x, b.min.y + 1f, b.center.z), new Vector3(b.size.x, 2f, b.size.z));
+                    if (Occupants(tall, null, null, def).Count > 0) continue;
+                    b.Expand(new Vector3(0f, 1000f, 0f));
+                    result.Add((PlaceName(ids), b));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[Build] Could not read the marked places: {ex.Message}");
+        }
+        _freePlaces = result;
+        _freePlacesAt = Time.unscaledTime;
+        return result;
+    }
+
+    /// <summary>"Beichtstuhl" for confession_1_place, confession_2_place, ...: the first one's name without its level.</summary>
+    private static string PlaceName(List<string> ids)
+    {
+        var id = ids[0];
+        if (id.EndsWith("_place")) id = id.Substring(0, id.Length - "_place".Length);
+        return System.Text.RegularExpressions.Regex.Replace(ObjectNames.Of(id), @"\s+[IVX]+$", "");
+    }
+
+    /// <summary>The building whose free place the building under the pointer would cover, or null.</summary>
+    private static string PlaceTakenFor(List<(string Name, Bounds Area)> places)
+    {
+        if (places.Count == 0) return null;
+        var footprint = PointerFootprint();
+        if (footprint == null) return null;
+        var fp = footprint.Value;
+        fp.Expand(new Vector3(-0.1f, 0f, -0.1f));
+        foreach (var (name, area) in places)
+            if (area.Intersects(fp)) return name;
+        return null;
+    }
+
     /// <summary>The workbench whose add-on room the building under the pointer would take, or null.</summary>
     private static Wgo ReservedBy(List<(Wgo Owner, Bounds Band)> bands)
     {
@@ -2012,6 +2180,8 @@ internal static class BuildingReader
         {
             var owner = ReservedBy(ReservedBands());
             if (owner != null) return Loc.Fmt("build.reserved", ObjectNames.Of(owner.Data.id));
+            var place = PlaceTakenFor(FreePlaces());
+            if (place != null) return Loc.Fmt("build.takes_place", place);
             if (TakesAddOns(CurrentBuild(_controller)))
             {
                 var slotBlockers = PlacingSlotBlockers();

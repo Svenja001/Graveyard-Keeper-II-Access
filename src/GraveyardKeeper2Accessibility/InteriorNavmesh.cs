@@ -39,6 +39,23 @@ internal static class InteriorNavmesh
     private static Pathfinding.RecastGraph _graph;
     private static readonly Dictionary<string, float> FailedAt = new();
 
+    /// <summary>What a scan needs of a room: a name for the log, its centre (floor height) and size.</summary>
+    private readonly struct Room
+    {
+        public readonly string Id;
+        public readonly Vector3 Center;
+        public readonly Vector2 Size;
+
+        public Room(string id, Vector3 center, Vector2 size)
+        {
+            Id = id;
+            Center = center;
+            Size = size;
+        }
+
+        public Room(WorldZoneData zone) : this(zone.id ?? "", zone.Center, zone.wholeZoneRect.size) { }
+    }
+
     /// <summary>
     /// The mod's own graph when it covers the zone the player is in, building it on first need.
     /// Null where the zone has a navmesh of its own, or is no room (a bridge in the open has no
@@ -48,8 +65,9 @@ internal static class InteriorNavmesh
     {
         try
         {
-            var zone = player == null || MainGame.PlayerData == null ? null : MainGame.PlayerData.CurrentWorldZoneData;
-            if (zone == null) return null;
+            if (player == null || MainGame.PlayerData == null) return null;
+            var zone = MainGame.PlayerData.CurrentWorldZoneData;
+            if (zone == null) return ForUnzoned(player);
             var id = zone.id ?? "";
 
             // Reported (2026-10-06): in Jack's workshop Jack and everything else was "out of reach"
@@ -74,43 +92,115 @@ internal static class InteriorNavmesh
                 return null;
             }
 
-            if (_builtFor == id && _graph != null && Covers(_graph, zone))
-            {
-                EnsureUpper(zone);
-                return _graph;
-            }
-            if (FailedAt.TryGetValue(id, out var at) && Time.unscaledTime - at < 30f) return null;
-
-            // Covered by the scene's navmesh after all: nothing to build. Asked at the player, not at
-            // the zone's centre. Reported (2026-10-06, second try): in Jack's workshop
-            // (workshop_conveyor) the scene had a patch of floor 3.4 m from the centre, so the room
-            // counted as covered - while the player, at the door and beside Jack, stood on none of
-            // it. Jack, the exit and everything else stayed "out of reach".
-            var scene = player.SceneRecastGraph;
-            if (HasFloorUnder(scene, player.MovablePosition))
-            {
-                Skipped(id, "is covered by the scene's navmesh where the player stands");
-                return null;
-            }
-
-            var graph = Build(zone);
-            if (graph == null)
-            {
-                FailedAt[id] = Time.unscaledTime;
-                return null;
-            }
-            _builtFor = id;
-            _graph = graph;
-            _upper = null;
-            _upperFor = null;
-            EnsureUpper(zone);
-            return graph;
+            return ForRoom(player, new Room(zone));
         }
         catch (Exception ex)
         {
             Plugin.Log?.LogWarning($"[Nav] Could not give the room a navmesh: {ex.Message}");
             return null;
         }
+    }
+
+    private static Pathfinding.RecastGraph ForRoom(PlayerController player, Room room)
+    {
+        var id = room.Id;
+        if (_builtFor == id && _graph != null && Covers(_graph, room))
+        {
+            EnsureUpper(room);
+            return _graph;
+        }
+        if (FailedAt.TryGetValue(id, out var at) && Time.unscaledTime - at < 30f) return null;
+
+        // Covered by the scene's navmesh after all: nothing to build. Asked at the player, not at
+        // the zone's centre. Reported (2026-10-06, second try): in Jack's workshop
+        // (workshop_conveyor) the scene had a patch of floor 3.4 m from the centre, so the room
+        // counted as covered - while the player, at the door and beside Jack, stood on none of
+        // it. Jack, the exit and everything else stayed "out of reach".
+        var scene = player.SceneRecastGraph;
+        if (HasFloorUnder(scene, player.MovablePosition))
+        {
+            Skipped(id, "is covered by the scene's navmesh where the player stands");
+            return null;
+        }
+
+        var graph = Build(room);
+        if (graph == null)
+        {
+            FailedAt[id] = Time.unscaledTime;
+            return null;
+        }
+        _builtFor = id;
+        _graph = graph;
+        _upper = null;
+        _upperFor = null;
+        EnsureUpper(room);
+        return graph;
+    }
+
+    /// <summary>A room's exit door this close to the player, on their floor, marks them as inside it.</summary>
+    private const float ExitReach = 20f;
+
+    /// <summary>Side of the square scanned round the player in a room with no zone of its own.</summary>
+    private const float UnzonedSide = 30f;
+
+    private static Room? _unzoned;
+
+    /// <summary>
+    /// <para>
+    /// <b>Reported (2026-10-30): inside the nun's house the tracker showed neither Agatha nor
+    /// Herbert</b>, who wait there for the writing machine and the trilogy. The list held 6 things,
+    /// none in the room; the log had them all "parked off the map" (no floor on any graph), and no
+    /// scan of the room ever ran. The house has no world zone at all - the game sets the player's
+    /// zone only from trigger boxes (<c>PlayerPhysicalBody</c>), and this room has none - so
+    /// <see cref="For"/> stopped at the missing zone without a word.
+    /// </para>
+    /// <para>
+    /// A room the player is in is told by its exit door: a <c>tp_…_exit</c> close by, on the
+    /// player's floor (outdoor teleports are <c>…_enter</c>). The scan is a square round the player
+    /// as they first stand in the room, kept for as long as they stay on its floor.
+    /// </para>
+    /// </summary>
+    private static Pathfinding.RecastGraph ForUnzoned(PlayerController player)
+    {
+        var at = player.MovablePosition;
+        if (_unzoned is { } last && _builtFor == last.Id && HasFloorUnder(_graph, at))
+            return ForRoom(player, last);
+
+        WgoData exit = null;
+        var nearest = ExitReach;
+        foreach (var wgo in Navigator.SpawnedWgos)
+        {
+            var data = wgo == null ? null : wgo.Data;
+            var id = data?.id;
+            if (id == null || !id.StartsWith("tp_", StringComparison.OrdinalIgnoreCase)
+                || id.IndexOf("exit", StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (Mathf.Abs(data.Position.y - at.y) > Reachability.MaxStandGap) continue;
+            var d = Flat(data.Position - at);
+            if (d < nearest) { nearest = d; exit = data; }
+        }
+        if (exit == null)
+        {
+            Skipped("(none)", "- the player is in no world zone and no room exit is near; no scan");
+            return null;
+        }
+
+        var name = RoomName(exit.id);
+        if (!(_unzoned is { } known && known.Id == name))
+        {
+            _unzoned = new Room(name, new Vector3(at.x, exit.Position.y, at.z), new Vector2(UnzonedSide, UnzonedSide));
+            Plugin.Log?.LogInfo($"[Nav] Room '{name}' has no world zone; taking the {UnzonedSide} m square round the player, by its exit '{exit.id}' {nearest:0.0} m away.");
+        }
+        return ForRoom(player, _unzoned.Value);
+    }
+
+    /// <summary>"tp_RT_nun_home_exit" → "nun_home".</summary>
+    private static string RoomName(string exitId)
+    {
+        var name = exitId;
+        if (name.StartsWith("tp_RT_", StringComparison.OrdinalIgnoreCase)) name = name.Substring(6);
+        else if (name.StartsWith("tp_", StringComparison.OrdinalIgnoreCase)) name = name.Substring(3);
+        if (name.EndsWith("_exit", StringComparison.OrdinalIgnoreCase)) name = name.Substring(0, name.Length - 5);
+        return name;
     }
 
     private static readonly HashSet<string> LoggedSkips = new();
@@ -131,10 +221,10 @@ internal static class InteriorNavmesh
     }
 
     /// <summary>Still ours and still over this zone - the game might rescan the slot for a fight.</summary>
-    private static bool Covers(Pathfinding.RecastGraph graph, WorldZoneData zone) =>
+    private static bool Covers(Pathfinding.RecastGraph graph, Room zone) =>
         graph.CountNodes() > 0 && Flat(graph.forcedBoundsCenter - zone.Center) < 0.5f;
 
-    private static Pathfinding.RecastGraph Build(WorldZoneData zone)
+    private static Pathfinding.RecastGraph Build(Room zone)
     {
         var graphs = AstarPath.active == null || AstarPath.active.data == null ? null : AstarPath.active.data.graphs;
         if (graphs == null) return null;
@@ -160,7 +250,7 @@ internal static class InteriorNavmesh
         }
         if (spare == null)
         {
-            Plugin.Log?.LogWarning($"[Nav] No free graph slot for a navmesh in '{zone.id}'.");
+            Plugin.Log?.LogWarning($"[Nav] No free graph slot for a navmesh in '{zone.Id}'.");
             return null;
         }
 
@@ -168,11 +258,11 @@ internal static class InteriorNavmesh
     }
 
     /// <summary>Scans <paramref name="slot"/> as a floor plate at <paramref name="center"/>'s height over the zone.</summary>
-    private static bool Scan(Pathfinding.RecastGraph template, Pathfinding.RecastGraph slot, WorldZoneData zone, Vector3 center, string what)
+    private static bool Scan(Pathfinding.RecastGraph template, Pathfinding.RecastGraph slot, Room zone, Vector3 center, string what)
     {
         CopySettings(template, slot);
         LazySingleton<GlobalNavigationManager>.Instance.InitRecastGraph(
-            (LazyConsts.Navigation.Graph)slot.graphIndex, center, zone.wholeZoneRect.size);
+            (LazyConsts.Navigation.Graph)slot.graphIndex, center, zone.Size);
         Reachability.ForgetNodeCounts();
 
         var dropped = DropFloorless(slot);
@@ -181,10 +271,10 @@ internal static class InteriorNavmesh
         var walkable = 0;
         slot.GetNodes(node => { if (node.Walkable) walkable++; });
         Plugin.Log?.LogInfo(
-            $"[Nav] '{zone.id}' has no navmesh of its own; scanned its {what} on graph {slot.graphIndex} " +
+            $"[Nav] '{zone.Id}' has no navmesh of its own; scanned its {what} on graph {slot.graphIndex} " +
             $"(settings of graph {template.graphIndex}): {walkable} walkable node(s), {dropped} dropped for no floor, " +
             $"{islands} on patches no ladder or door reaches{(kept.Count == 0 ? "" : ", kept: " + string.Join(", ", kept))}; " +
-            $"centre {center}, size {zone.wholeZoneRect.size}.");
+            $"centre {center}, size {zone.Size}.");
         return walkable > 0;
     }
 
@@ -219,9 +309,9 @@ internal static class InteriorNavmesh
         }
     }
 
-    private static void EnsureUpper(WorldZoneData zone)
+    private static void EnsureUpper(Room zone)
     {
-        if (_upperFor == zone.id || Time.unscaledTime - _upperCheckedAt < 2f) return;
+        if (_upperFor == zone.Id || Time.unscaledTime - _upperCheckedAt < 2f) return;
         _upperCheckedAt = Time.unscaledTime;
 
         var level = RaisedLevel(zone);
@@ -241,10 +331,10 @@ internal static class InteriorNavmesh
             slot = g;
             break;
         }
-        _upperFor = zone.id;
+        _upperFor = zone.Id;
         if (slot == null)
         {
-            Plugin.Log?.LogWarning($"[Nav] No free graph slot for the raised floor in '{zone.id}'.");
+            Plugin.Log?.LogWarning($"[Nav] No free graph slot for the raised floor in '{zone.Id}'.");
             return;
         }
 
@@ -259,9 +349,9 @@ internal static class InteriorNavmesh
     /// The height of a raised floor in the zone: a door or a ladder end standing more than a step
     /// above the room's floor. Null when there is none, or nothing has spawned yet to tell.
     /// </summary>
-    private static float? RaisedLevel(WorldZoneData zone)
+    private static float? RaisedLevel(Room zone)
     {
-        var half = zone.wholeZoneRect.size * 0.5f;
+        var half = zone.Size * 0.5f;
         bool Inside(Vector3 p) => Mathf.Abs(p.x - zone.Center.x) <= half.x && Mathf.Abs(p.z - zone.Center.z) <= half.y;
 
         float? fromLadder = null;

@@ -1,3 +1,23 @@
+## 0.2.2
+
+* **You always know which bag you are in.** The game lists every bag you carry under your
+inventory, and arrowing ran from one into the next without a word. Now the bag's name is said
+whenever you arrow into it ("Tool bag: Shovel"), and back in your own items you hear your
+inventory's heading. Two bags of one kind are numbered. On the character page **F6** jumps to the next bag,
+as it jumps between the sides of a chest; in a chest each bag is a stop of its own on your side.
+* **People and things in the nun's house are on the tracker.** Inside the house where Agatha and
+Herbert wait for their gifts, the object list showed none of them, nor the way out. That room has no
+area of its own in the game, so the mod never mapped its floor; it now does for any room like it.
+* **"No free spot" says what is in the way on marked places.** When a building needs a marked
+place (a confessional, a bench, a grave) and every one is taken, you hear what stands on them, for
+example "No room left on the 2 places for this. On them: Confession Booth III, Simple Chest". Before,
+it only said there was no free spot, or told you to turn the building. When a place looks empty but
+the game still refuses it, you now hear what the game finds in the way there.
+* **Free spots keep other buildings' places free.** Space and End no longer offer a spot for a chest
+or anything else on an empty place meant for another building, such as a confession place in the
+church or a grave plot. Moving onto one with the arrow keys says "takes the place for Confession Booth".
+If nothing else is free, those spots are still offered, with a warning first.
+
 ## 0.2.1
 
 Updated for the game's patch 1.011.

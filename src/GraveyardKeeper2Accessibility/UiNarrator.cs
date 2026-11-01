@@ -48,6 +48,7 @@ internal static class UiNarrator
 
     /// <summary>The chest-window side focus was last on, so it is named only on crossing.</summary>
     private static string _lastSection;
+    private static string _lastPart;
 
     /// <summary>
     /// Until this time (unscaled), a focus change is queued behind whatever is being said instead of
@@ -144,10 +145,20 @@ internal static class UiNarrator
             var label = DescribeItem(item);
 
             // Name the side of a chest window whenever focus crosses into it - see ChestSections.
+            // Inside a side, a bag (or zone chest) under your inventory is named the same way - see
+            // InventorySections. Entering a side on its first part needs only the side's name.
             var section = ChestSections.SectionName(item) ?? VendorReader.SectionName(item);
-            if (section != null && section != _lastSection && !string.IsNullOrEmpty(label))
-                label = Loc.Fmt("chest.side", section, label);
+            var part = InventorySections.PartName(item);
+            var partIndex = InventorySections.PartOf(item);
+            if (!string.IsNullOrEmpty(label))
+            {
+                if (part != null && (section == _lastSection ? part != _lastPart : partIndex > 0))
+                    label = Loc.Fmt("chest.side", part, label);
+                if (section != null && section != _lastSection)
+                    label = Loc.Fmt("chest.side", section, label);
+            }
             _lastSection = section;
+            _lastPart = part;
 
             // Logged as well as spoken, and logged even when there is nothing to say. Whether
             // arrow keys actually traverse a window is a thing only a person at the keyboard can
@@ -182,6 +193,7 @@ internal static class UiNarrator
             // allowed to be spoken again - see ScreenReader.ClearMenuContext.
             ScreenReader.ClearMenuContext();
             _lastFocusLabel = null;
+            _lastPart = null;
             FocusedItem = null;
             BodyWindowsReader.Reset();
             ChestButtons.Reset();

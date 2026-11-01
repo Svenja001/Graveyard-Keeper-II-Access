@@ -131,7 +131,7 @@ internal static class MenuKeys
             return;
         }
 
-        if (_switchSideKey.Value.IsDown() && ChestSections.TryCycle())
+        if (_switchSideKey.Value.IsDown() && (ChestSections.TryCycle() || InventorySections.TryCycle()))
         {
             _heldKey = KeyCode.None;
             return;

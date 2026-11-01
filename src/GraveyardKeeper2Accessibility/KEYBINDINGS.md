@@ -156,7 +156,7 @@ So there are two sets of keys that both work, and neither disturbs the other:
 | **Arrow keys** | Move between controls — added by the mod. |
 | **W / A / S / D** | The same thing, using the game's own bindings. |
 | **Enter** | Activate the focused control — added by the mod. |
-| **F6** | In a chest, shop or conveyor chest: jump between your bag, the chest and the conveyor slots. The side is also named whenever you arrow into it. |
+| **F6** | In a chest, shop or conveyor chest: jump between your bag, the chest and the conveyor slots. The side is also named whenever you arrow into it. In a chest, each bag you carry is a stop of its own. On the character page: jump between your inventory and each bag you carry (and the bag you opened). The bag's name is also said whenever you arrow into it; two bags of one kind are numbered. |
 | **Up arrow, then Enter** | In a chest: Up from the top row lands on "Move all identical items to the chest", and Enter puts everything you carry that the chest already holds into it — added by the mod. Down goes back. The game hides this button unless you use the mouse. |
 | **Space** | On an item in a chest, shop or your bag: move it to the other side (out of the chest into your bag, or back) — added by the mod. The game only offers this on a controller or the right mouse button. |
 | **1 – 4** | On an item in your inventory (character page): put it on that hotbar slot — added by the mod. You hear "… on hotbar slot 2", and what it replaced. Items that cannot be used from the hotbar say so. Inventory items already on the hotbar say "hotbar 2". |

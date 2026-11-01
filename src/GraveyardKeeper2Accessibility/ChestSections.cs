@@ -47,7 +47,9 @@ internal static class ChestSections
         var current = SideOf(focused, out var window);
         if (current == Side.None || window == null) return false;
 
-        var bySide = new Dictionary<Side, List<GamepadNavigationItem>>();
+        // Each bag you carry (and each zone chest listed under them) is a stop of its own on your
+        // side, so F6 walks inventory, bag, bag, chest - see InventorySections.
+        var stops = new SortedDictionary<int, List<GamepadNavigationItem>>();
         foreach (var nav in window.GetComponentsInChildren<GamepadNavigationItem>(includeInactive: false))
         {
             if (nav == null || !nav.Active || !nav.TryGetComponent<UIItemCell>(out _)) continue;
@@ -55,50 +57,38 @@ internal static class ChestSections
             var side = SideOf(nav, out _);
             if (side == Side.None) continue;
 
-            if (!bySide.TryGetValue(side, out var list)) bySide[side] = list = new List<GamepadNavigationItem>();
+            var stop = StopOf(side, nav);
+            if (!stops.TryGetValue(stop, out var list)) stops[stop] = list = new List<GamepadNavigationItem>();
             list.Add(nav);
         }
 
         // Whether the chest side is reachable at all is only confirmable at the keyboard; this line
         // tells "no cells found" apart from "cells found but not focusable" afterwards.
-        Plugin.Log?.LogInfo($"[Keys] Chest sides from {current}: " +
-            string.Join(", ", bySide.Select(kv => $"{kv.Key} {kv.Value.Count} ({kv.Value.Count(HasItem)} filled)")));
+        var from = StopOf(current, focused);
+        Plugin.Log?.LogInfo($"[Keys] Chest sides from {current} part {from % PartsPerSide}: " +
+            string.Join(", ", stops.Select(kv => $"{Order[kv.Key / PartsPerSide]} part {kv.Key % PartsPerSide} {kv.Value.Count} ({kv.Value.Count(InventorySections.HasItem)} filled)")));
 
-        var start = Array.IndexOf(Order, current);
-        for (var step = 1; step < Order.Length; step++)
+        var keys = stops.Keys.Where(k => k != from).ToList();
+        if (keys.Count == 0)
         {
-            var side = Order[(start + step) % Order.Length];
-            if (!bySide.TryGetValue(side, out var cells) || cells.Count == 0) continue;
-
-            // The first thing actually in it, so a chest with one item in slot twelve does not
-            // open on eleven empty slots.
-            var target = cells.FirstOrDefault(HasItem) ?? cells[0];
-            var controller = focused.Controller;
-
-            // SetFocusedItem only knows items from the controller's last scan and falls back to
-            // the very first item otherwise; a chest's side can be drawn after that scan.
-            if (!Registered(controller).Contains(target)) controller.ReinitItems(focusOnFirstActive: false);
-            if (!Registered(controller).Contains(target)) return false;
-
-            controller.SetFocusedItem(target);
+            ScreenReader.Say(Loc.Get("chest.no_other_side"));
             return true;
         }
 
-        ScreenReader.Say(Loc.Get("chest.no_other_side"));
-        return true;
+        // The first thing actually in it, so a chest with one item in slot twelve does not open
+        // on eleven empty slots.
+        var later = keys.Where(k => k > from).ToList();
+        return InventorySections.Focus(focused.Controller, InventorySections.FirstOf(stops[later.Count > 0 ? later[0] : keys[0]]));
     }
+
+    private const int PartsPerSide = 10000;
+
+    private static int StopOf(Side side, GamepadNavigationItem item) =>
+        Array.IndexOf(Order, side) * PartsPerSide + Math.Max(0, InventorySections.PartOf(item));
 
     /// <summary>True for a cell on the player's side of a chest window.</summary>
     internal static bool IsPlayerSide(GamepadNavigationItem item, out UIBaseChestWindow window) =>
         SideOf(item, out window) == Side.Player;
-
-    private static readonly AccessTools.FieldRef<GamepadNavigationController, List<GamepadNavigationItem>> Registered =
-        AccessTools.FieldRefAccess<GamepadNavigationController, List<GamepadNavigationItem>>("selectableItems");
-
-    private static bool HasItem(GamepadNavigationItem nav)
-    {
-        return nav.TryGetComponent<UIItemCell>(out var cell) && cell.DisplayingItem != null && !cell.DisplayingItem.IsEmpty;
-    }
 
     private static Side SideOf(GamepadNavigationItem item, out UIBaseChestWindow window)
     {
