@@ -1,3 +1,52 @@
+## 0.2.3
+
+* **Works with game update 1.012.** The update changed how the game reports a walk it cannot
+find a route for. Without this fix an unreachable walk said "arrived" before "no route".
+* **The new PR machine window is read.** It says whether a campaign is running and how many days
+are left, whether you can load it today, and the next upgrade with its cost. Enter on the slot loads
+hypno-devices and newspapers. The upgrade button, hidden on a keyboard, is reached with any arrow;
+Enter upgrades.
+* **Resting on the campfire bench is announced.** You hear when you sit down, when your energy is
+full and when you stand up. E now stands you up as well as Escape.
+* **U reads the map's new figures** anywhere: zombies and their limit, PR machine days left, town
+reputation, the trade orders with their items, the morgue, and the church and graveyard quality.
+* **Graves are sorted by what they need, as in the first game.** The object tracker now has
+"empty graves" (dug and waiting for a body), "graves to dig out" (marked plots, and graves you are
+exhuming), "graves to fill in" (a body lies in the open hole), "graves to decorate" and "graves you
+can exhume". "All graves" still lists every one. Graves with a body in the hole and graves being
+exhumed were in no grave list before.
+* **You hear a grave's maximum rating.** In the tracker a filled grave says "rating 3 of 5", or
+"the most this body allows" when it can go no higher. Opening a grave says "Grave quality 3 of at
+most 5, 2 short of the maximum". The maximum is the body's white skulls; no headstone or fence lifts
+a grave past it.
+* **Removing a headstone or fence works with F.** The removal window has no Craft button, only
+"Remove" on Space, so F said "cannot be made right now" with no reason. F now removes the part, and
+the window says "Space: Remove" instead of "Space: Add to queue".
+* **The exhume question says you need an exhumation permit.** It used to stop at "To exhume a body
+you need:". Now you hear "Needs 1 Exhumation Permit, you have 0".
+* **Ratings say when red skulls hold a grave back.** A grave below its maximum now says, for example,
+"rating 9 of 10, 1 red skull lowers it", in the tracker and in the grave window.
+* **Bushes say what kind they are.** Grown blueberry, berry and rhododendron bushes were all just
+"Bush" in the object list; the game names only the smallest size of each. They now use the game's
+name for their kind ("Blueberry Bush", "Rhododendron Bush"), and barberry bushes say "Barberry bush".
+* **The donkey no longer turns up as a story step when he has nothing to say.** An old story check
+for one of his talks stayed in the save after the talk was over, and the mod listed him for it. A
+check like that now counts only while the talk is really there.
+* **Finished story zones are left out.** Zones such as "Doctor Sister" stayed in the story triggers
+after their quest was done, and every walk warned about story zones on the way that no longer do
+anything. A zone whose quests are all completed, or that belongs to no quest at all (like the wolf
+warning on the bridge to the sawmill forest, which plays on every visit), is now left out of the list
+and of the warning.
+* **The object lists are sorted by what things are, not how the game files them.** New lists:
+"material stores" (wood, stone, marble, ore, coal, clay and sand piles and the storehouses, which
+were split between "special objects" and chests), "town shops and vendors" (the shops, the order
+board and the royal mail, which were "special story objects"), and "morgue: tables and corpse
+pallets" (autopsy, embalming, cremation and resurrection tables, corpse pallets). Take-all chests
+are with the chests, battle camps with the fight planning, the folio with the alchemy tables, the
+bed and the village toilet with the places, loot bags and archer remains with the loot.
+* **Fewer raw names.** Copper veins, marble deposits, sand and clay pits, lakes, rivers, the sea,
+looters' chests, broken barrels, rubbish, junk, ladders and more now have names instead of their ids.
+
 ## 0.2.2
 
 * **You always know which bag you are in.** The game lists every bag you carry under your

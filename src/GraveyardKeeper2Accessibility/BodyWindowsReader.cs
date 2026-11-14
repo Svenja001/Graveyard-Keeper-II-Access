@@ -326,7 +326,7 @@ internal static class BodyWindowsReader
         var parts = new List<string>
         {
             data.WgoData?.id == null ? TmpText.Clean(LLBase.L("ui_grave")) : ObjectNames.Of(data.WgoData.id),
-            Loc.Fmt("body.grave_quality", Number(data.Quality)),
+            GraveQuality(data),
         };
 
         var corpse = data.CorpseWidgetData;
@@ -342,6 +342,19 @@ internal static class BodyWindowsReader
 
         parts.RemoveAll(string.IsNullOrWhiteSpace);
         return string.Join(". ", parts);
+    }
+
+    /// <summary>
+    /// "Grave quality 3 of at most 5, decoration can add 2 more" - the cap is the body's white
+    /// skulls (<see cref="GraveInfo"/>), shown on screen only as the length of a slider.
+    /// </summary>
+    private static string GraveQuality(UIGraveWindowData data)
+    {
+        if (data.WgoData == null || !GraveInfo.TryRating(data.WgoData, out var current, out var max, out var red))
+            return Loc.Fmt("body.grave_quality", Number(data.Quality));
+        return GraveInfo.AtMax(current, max)
+            ? Loc.Fmt("body.grave_quality_max", Number(current))
+            : GraveInfo.WithRed(Loc.Fmt("body.grave_quality_of", Number(current), Number(max), Number(max - current)), red);
     }
 
     /// <summary>"Organs: heart: human heart, brain: unknown, …" for a body item. Also used by the resurrection table.</summary>

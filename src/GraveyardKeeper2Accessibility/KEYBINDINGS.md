@@ -66,6 +66,7 @@ and Z, because R, P and Q are the game's own keys here (rotate, inspirations, qu
 | **Shift+G** / **Ctrl+G** | In the factory: the next / previous conveyor line. |
 | **Y** | What you carry overhead (and, for a supply crate, where it goes), then what is in the four hotbar slots and how many of each you are carrying. |
 | **O** | In a window: full details of the focused item — name, stars, how many you have, and its tooltip or description. Anywhere else a tooltip is showing, reads it again in full. |
+| **U** | What the map shows on its day icons: zombies and their limit, the PR machine's days left, town reputation, the trade orders ("3 of 5 Pottery"), the morgue, and the church and graveyard quality. Works anywhere. |
 
 The game shows the time only as a sun and moon moving round a wheel, with no clock. The time the
 mod gives is where the wheel is, read as a 24-hour clock: midnight at the bottom, noon at the top.
@@ -183,6 +184,15 @@ reads back what you wrote (it no longer closes the window or throws the text awa
 arrow keys go through title, description, the categories, Send and Cancel; **Enter** puts the cursor
 back in a field, picks a category or presses the button. F8 reads the field you are in. If Send
 refuses (no title), you hear why; after sending, the game's "sending" and "thank you" boxes are read.
+
+**PR machine:** says whether a campaign is running and how many days are left, whether you can load
+it today (only on the Day of Gluttony), and the next upgrade with its cost and what you have. Enter on
+the load slot opens the list of hypno-devices and newspapers. Any arrow goes to the **Upgrade** stop,
+which the game hides on a keyboard; Enter there upgrades. Arrows again return to the slot.
+
+**Resting on the campfire bench:** you hear when you sit down, when your energy is full and when you
+stand up. **E** or **Escape** stands you up. Resting passes time faster but does not save, and does
+not cure insanity or lack of sleep. Autowalk waits until you stand up.
 
 **Hotbar slot window** ("put on the hotbar" in an item's menu, Shift+F10): says the item and what the
 four slots hold. Arrows choose a slot, **Enter** or **1 – 4** puts the item there, **Escape** leaves

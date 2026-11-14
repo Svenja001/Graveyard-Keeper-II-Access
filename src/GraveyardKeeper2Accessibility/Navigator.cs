@@ -47,8 +47,9 @@ internal static class Navigator
     private static readonly string[] CategoryPriority =
     {
         "story", "new", "fight_points", "wgo.Flag", "wgo.FlagStand", "wgo.Barricade", "wgo.FightBuilder", "wgo.FighterContainer",
-        "people", "doors", "named", "desks", "wgo.Script", "wgo.CustomInteraction", "drops",
-        "plants", "beehives", "trees", "rocks", "loot", "obstacles", "wgo.Grave", "graves_decorate", "wgo.Craft", "repairs", "wgo.Chest",
+        "people", "town", "doors", "named", "desks", "wgo.Script", "wgo.CustomInteraction", "drops",
+        "plants", "beehives", "trees", "rocks", "loot", "obstacles",
+        "graves_empty", "graves_dig", "graves_fill", "graves_decorate", "graves_exhume", "wgo.Grave", "morgue", "wgo.Craft", "repairs", "wgo.Chest", "stores",
         "wgo.Work", "ladders", "enemies", "zones",
     };
 
@@ -612,29 +613,50 @@ internal static class Navigator
     /// headstone or no fence. The parts are <c>AdditionalWgoPartsData</c> whose item is in the
     /// "gravetop" or "gravebot" group - the same test the grave window uses to refuse exhuming.
     /// </para>
+    ///
+    /// <para>
+    /// <b>One list per job, as in GK1</b> (user, 2026-11-07: "the player can directly find their
+    /// empty graves"). The whole life, read out of <c>resources.assets</c>: marked
+    /// <c>grave_empty_place</c> → dug <c>grave_empty</c>, which takes the carried body →
+    /// <c>grave_body</c>, filled in with the shovel → <c>grave_ground</c>. Exhuming turns it into
+    /// <c>grave_exhume</c>, dug out with the shovel → <c>grave_empty</c> again, and drops the body.
+    /// <c>grave_body</c> and <c>grave_exhume</c> were in no grave list before. Every grave is
+    /// also under "all graves", so the general browse stays complete; filled ones carry their rating.
+    /// </para>
     /// </summary>
     private static bool AddGrave(WgoData data)
     {
         var id = data.id;
         if (string.IsNullOrEmpty(id)) return false;
 
-        string label;
+        string label, job = null;
         if (id.StartsWith("grave_empty_place", StringComparison.OrdinalIgnoreCase))
-            label = Loc.Get("grave.marked");
+            (label, job) = (Loc.Get("grave.marked"), "graves_dig");
         else if (id.StartsWith("grave_empty", StringComparison.OrdinalIgnoreCase))
-            label = Loc.Get("grave.dug");
+            (label, job) = (Loc.Get("grave.dug"), "graves_empty");
+        else if (id.StartsWith("grave_exhume", StringComparison.OrdinalIgnoreCase))
+            (label, job) = (Loc.Get("grave.exhuming"), "graves_dig");
+        else if (id.StartsWith("grave_body", StringComparison.OrdinalIgnoreCase))
+            (label, job) = (Loc.Get("grave.to_fill"), "graves_fill");
         else if (data.Definition.interactionType == WGODef.InteractionType.Grave)
         {
             var hasBody = GraveHasBody(data);
-            var needs = GraveNeeds(data);
+            var needs = GraveNeeds(data, out var bare);
             label = Loc.Get(hasBody ? "grave.with_body" : "grave.no_body");
+            var rating = GraveInfo.RatingText(data);
+            if (rating != null) label = $"{label}, {rating}";
             if (needs != null) label = $"{label}, {needs}";
 
             if (hasBody && needs != null)
                 AllTargets.Add(new NavTarget(id, data.Position, data.WorldId, "graves_decorate", label, data));
+            // Exhuming is refused while a headstone or a fence is on - the grave window's own test.
+            if (hasBody && bare)
+                AllTargets.Add(new NavTarget(id, data.Position, data.WorldId, "graves_exhume", label, data));
         }
         else return false;
 
+        if (job != null)
+            AllTargets.Add(new NavTarget(id, data.Position, data.WorldId, job, label, data));
         AllTargets.Add(new NavTarget(id, data.Position, data.WorldId, "wgo." + WGODef.InteractionType.Grave, label, data));
         return true;
     }
@@ -745,10 +767,14 @@ internal static class Navigator
         return false;
     }
 
-    /// <summary>"needs a headstone and a fence", "needs a fence", or null when both are there.</summary>
-    private static string GraveNeeds(WgoData data)
+    /// <summary>
+    /// "needs a headstone and a fence", "needs a fence", or null when both are there.
+    /// <paramref name="bare"/> is true when neither is on - the only state a body can be exhumed in.
+    /// </summary>
+    private static string GraveNeeds(WgoData data, out bool bare)
     {
         bool top = false, bot = false;
+        bare = false;
         try
         {
             var parts = data.AdditionalWgoPartsData;
@@ -770,6 +796,7 @@ internal static class Navigator
             return null;
         }
 
+        bare = !top && !bot;
         if (top && bot) return null;
         return Loc.Get(!top && !bot ? "grave.needs_both" : !top ? "grave.needs_top" : "grave.needs_bot");
     }
@@ -884,6 +911,14 @@ internal static class Navigator
                 var awaited = StoryListeners.AwaitsZone(zone);
                 if (!awaited && !HasAnyScript(zone)) continue;
 
+                // Its scene belongs to quests that are all done: walking in does nothing any more.
+                if (!awaited && StoryListeners.ZoneDone(zone))
+                {
+                    LogZoneDone(zone, done: true);
+                    continue;
+                }
+                if (!awaited) LogZoneDone(zone, done: false);
+
                 // The middle of the volume, so walking there is certain to cross the boundary
                 // rather than clip its edge.
                 var collider = zone.GetComponent<Collider>();
@@ -899,6 +934,23 @@ internal static class Navigator
         {
             _log?.LogWarning($"[Nav] Could not read story zones: {ex.Message}");
         }
+    }
+
+    private static readonly HashSet<string> LoggedDoneZones = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Once per zone: a scripted zone no quest listens for, whether it was left out as finished, and
+    /// its scripts - to check the quest match when one is still listed after its story is over.
+    /// </summary>
+    internal static void LogZoneDone(GDZone zone, bool done)
+    {
+        var tag = string.IsNullOrEmpty(zone.customTag) ? zone.name : zone.customTag;
+        if (!LoggedDoneZones.Add(tag)) return;
+        var scripts = string.Join("/", new[] { zone.onEnter, zone.onExit, zone.onCrossedToLeft, zone.onCrossedToRight, zone.onCrossedToUp, zone.onCrossedToDown }
+            .Select(ScriptName).Where(n => n != null));
+        _log?.LogInfo(done
+            ? $"[Nav] Left out story zone '{tag}': its quests are done or none belongs to it (scripts {scripts})."
+            : $"[Nav] Story zone '{tag}' kept: scripted, no quest listens, a quest of it is still open (scripts {scripts}).");
     }
 
     /// <summary>
@@ -1164,6 +1216,44 @@ internal static class Navigator
         if (ObjectNames.IsBuilderDesk(id)) return "desks";
         if (words.Length > 0 && words[0] == "npc") return "people";
 
+        // ---- Regrouped from the full table (user, 2026-11-09: "still things in wrong categories
+        // from the game itself"; [NavCat] dump of every WGODef). The game's types put the town's
+        // shops, the order board and the bed under Script ("special story objects"), material piles
+        // under CustomInteraction or Chest, and the morgue's tables in four lists of two.
+        var isBuildSpot = type == WGODef.InteractionType.Builder || (words.Length > 0 && words[words.Length - 1] == "place");
+        if (!isBuildSpot)
+        {
+            // Wood, stone, marble, ore, coal, clay and sand piles, and the storehouses.
+            if (Has("container") || id.StartsWith("conveyor_storage", StringComparison.OrdinalIgnoreCase)
+                || id.StartsWith("garden_bags_storage", StringComparison.OrdinalIgnoreCase)
+                || id.StartsWith("conveyor_wine_beer_pallet", StringComparison.OrdinalIgnoreCase))
+                return "stores";
+
+            // Shops and vendors (t_b_jeweler, t_b_tent_2_t1, ...), the order board, the royal mail.
+            if (id.StartsWith("t_b_", StringComparison.OrdinalIgnoreCase) || id == "town_chalk_board" || id == "royal_mailbox")
+                return "town";
+
+            if (type == WGODef.InteractionType.Autopsy || type == WGODef.InteractionType.Embalm
+                || type == WGODef.InteractionType.Crematorium || type == WGODef.InteractionType.ResurrectionTable
+                || id.StartsWith("pallet_corpse", StringComparison.OrdinalIgnoreCase)
+                || id.StartsWith("autopsy_table", StringComparison.OrdinalIgnoreCase)
+                || id.StartsWith("power_switch_table", StringComparison.OrdinalIgnoreCase))
+                return "morgue";
+
+            // Take-all chests (world_chest, chest_take_all) are chests you empty in one go.
+            if (type == WGODef.InteractionType.TakeAll && Has("chest")) return "wgo." + WGODef.InteractionType.Chest;
+
+            // Battle camps are where the town fights are started.
+            if (id.StartsWith("battle_camp", StringComparison.OrdinalIgnoreCase)) return "wgo.FightBuilder";
+
+            if (id == "alchemy_recipe_book") return "wgo." + WGODef.InteractionType.Alchemy;
+            if (id == "portal_builder") return "desks";
+            if (id.StartsWith("loot_bag", StringComparison.OrdinalIgnoreCase) || id == "archer_remains") return "loot";
+            if (id.StartsWith("goddess_tears", StringComparison.OrdinalIgnoreCase) && type == WGODef.InteractionType.Work) return "plants";
+            if (id == "body_drop_grave_object") return "drops";
+            if (id == "bed" || id == "bathhouse_bench" || id == "village_toilet") return "named";
+        }
+
         // Fast travel milestones keep their own list; every other teleport is a doorway between
         // two rooms or areas.
         if (type != WGODef.InteractionType.TeleportMilestone
@@ -1216,6 +1306,7 @@ internal static class Navigator
     /// </summary>
     private static void RebuildCategories(Vector3 from)
     {
+        DumpCategoryTable();
         RebuildTargets(from);
 
         var previous = _categoryIndex >= 0 && _categoryIndex < Categories.Count ? Categories[_categoryIndex] : null;
@@ -1252,6 +1343,44 @@ internal static class Navigator
     }
 
     private static string _loggedNew;
+
+    private static bool _tableDumped;
+
+    /// <summary>
+    /// Once per session: every object kind the game defines, with the list <see cref="CategoryOf"/>
+    /// puts it in and its spoken name, one log line per list. Reported (2026-11-09) that things
+    /// still sit in the wrong lists "from the game itself"; the log only ever named the objects
+    /// walked to, so the whole table is written out to be reviewed in one go.
+    /// </summary>
+    private static void DumpCategoryTable()
+    {
+        if (_tableDumped) return;
+        _tableDumped = true;
+        try
+        {
+            var defs = GameBalance.Me?.wgoDefs;
+            if (defs == null) return;
+
+            var byCategory = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var def in defs)
+            {
+                if (def == null || string.IsNullOrEmpty(def.id)) continue;
+                if (def.interactionType == WGODef.InteractionType.None && !HasRealName(def.id) && !IsExtension(def.id)) continue;
+
+                var category = CategoryOf(def.id, def);
+                if (!byCategory.TryGetValue(category, out var list)) byCategory[category] = list = new List<string>();
+                var tool = def.toolAction == null ? ItemType.None : def.toolAction.actionableTool;
+                list.Add($"{def.id} ({def.interactionType}{(tool == ItemType.None ? "" : "/" + tool)}) = {ItemText.Name(def.id)}");
+            }
+
+            foreach (var pair in byCategory)
+                _log?.LogInfo($"[NavCat] {pair.Key} ({pair.Value.Count}): {string.Join("; ", pair.Value)}");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NavCat] Could not write the category table: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
 
     /// <summary>Priority categories first, in <see cref="CategoryPriority"/> order; the rest alphabetically.</summary>
     private static int CompareCategories(string a, string b)

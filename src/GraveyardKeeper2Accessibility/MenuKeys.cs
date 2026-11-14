@@ -84,7 +84,7 @@ internal static class MenuKeys
         // Without this, "return to the menu without saving?" simply cannot be answered yes.
         if (enter && (DialogWindowReader.TryConfirmActiveDialog() || NotesReader.TryClose() || TutorialReader.TryConfirm() ||
                       StationsReader.TryConfirm() || TreesReader.TryConfirm() || ItemCountReader.TryConfirm() ||
-                      BodyWindowsReader.TryEnter() || ChestButtons.TryPress() || QuestPageReader.TryConfirm() || SurveyResultReader.TryConfirm() || MilitaryReader.TryConfirm()))
+                      BodyWindowsReader.TryEnter() || ChestButtons.TryPress() || PrMachineReader.TryPress() || QuestPageReader.TryConfirm() || SurveyResultReader.TryConfirm() || MilitaryReader.TryConfirm()))
         {
             _heldKey = KeyCode.None;
             return;
@@ -187,6 +187,7 @@ internal static class MenuKeys
         UiNarrator.ArrowPressed();
         if (CraftReader.TryArrow(direction) || StationsReader.TryArrow(direction) ||
             BodyWindowsReader.TryArrow(controller, direction) || ChestButtons.TryArrow(controller, direction) ||
+            PrMachineReader.TryArrow(controller, direction) ||
             PickerNav.TryArrow(controller, direction)) return;
         controller.Navigate(direction);
     }

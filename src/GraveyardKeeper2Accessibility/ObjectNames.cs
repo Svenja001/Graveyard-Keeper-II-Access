@@ -43,6 +43,9 @@ internal static class ObjectNames
             return place == null ? Loc.Fmt("obj.milestone_number", MilestoneNumber(id)) : Loc.Fmt("obj.milestone", place);
         }
 
+        var sibling = SizeSibling(words);
+        if (sibling != null) return sibling;
+
         // A single word is looked up in the mod's list only: in the game's text "common" or "bed"
         // alone can be some unrelated UI string.
         for (var n = words.Count; n >= 1; n--)
@@ -59,6 +62,30 @@ internal static class ObjectNames
             return string.Join(" ", kept.Skip(1).Select(w => char.ToUpperInvariant(w[0]) + w.Substring(1)));
 
         return kept.Count == 0 ? id : string.Join(" ", kept);
+    }
+
+    private static readonly string[] Sizes = { "xxs", "xs", "s", "m", "l", "xl", "xxl" };
+    private static readonly Regex Colour = new(@"^clr\d+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The game's name for another size of the same thing, or null. The game names only some sizes:
+    /// <c>bush_blueberry_clr1_xxs</c> is "Blueberry Bush", while <c>bush_blueberry_clr1_l</c>, the
+    /// grown one players actually walk to, has no text - so every berry, blueberry and rhododendron
+    /// bush was just "Bush" (user, 2026-11-09: "it should tell me if it's a rhododendron or a berry
+    /// bush"). The words up to the colour tag (<c>clr1</c>) are the kind; each size is tried after them.
+    /// </summary>
+    private static string SizeSibling(List<string> words)
+    {
+        var colour = words.FindIndex(w => Colour.IsMatch(w));
+        if (colour < 1) return null;
+
+        var stem = string.Join("_", words.Take(colour + 1));
+        foreach (var size in Sizes)
+        {
+            var name = GameName(stem + "_" + size);
+            if (name != null) return name;
+        }
+        return null;
     }
 
     private static bool IsMilestone(List<string> words) =>

@@ -44,7 +44,6 @@ internal static class DialogWindowReader
             var parts = new List<string>();
             Add(parts, data.Header);
             Add(parts, data.Information);
-            Add(parts, data.InformationBot);
 
             // "Needs 5 planks, you have 3" - the counter is the entire reason some of these boxes
             // exist, and on screen it is a number in a colour that means enough or not enough.
@@ -54,6 +53,16 @@ internal static class DialogWindowReader
                 if (!string.IsNullOrWhiteSpace(itemName))
                     parts.Add(Loc.Fmt("dialog.item_count", data.HasItemCount, data.NeedItemCount, itemName));
             }
+            // The other item layout (ShowAltVersion): an icon, its name and "have / need" under a
+            // text ending in "you need:". The exhume box is one, and only the colon was read, so
+            // the player never heard that an exhumation permit is needed (user, 2026-11-07).
+            // ItemName is already localised there. Said before InformationBot, which is the question.
+            else if (data.ShowAltVersion && !string.IsNullOrWhiteSpace(data.ItemName))
+            {
+                parts.Add(Loc.Fmt("dialog.item_count", data.HasItemCount, data.NeedItemCount, TmpText.Clean(data.ItemName)));
+            }
+
+            Add(parts, data.InformationBot);
 
             var options = Options(data);
             if (!string.IsNullOrWhiteSpace(options))

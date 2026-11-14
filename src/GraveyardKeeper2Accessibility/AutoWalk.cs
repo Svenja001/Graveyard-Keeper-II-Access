@@ -48,6 +48,8 @@ internal static class AutoWalk
     {
         TakenControlType.ByFlow, TakenControlType.ByCinematics, TakenControlType.ByTeleport,
         TakenControlType.BySleep, TakenControlType.ByDeath, TakenControlType.BySceneLoading,
+        // Sitting on the campfire bench (1.012). Never released by force: see ReleaseControl.
+        TakenControlType.ByRest,
     };
 
     /// <summary>When the release key was first pressed, for the press-twice confirmation.</summary>
@@ -144,8 +146,19 @@ internal static class AutoWalk
     /// long-distance graph never ran because the result was never anything else, and the player
     /// heard "walking to X" followed by silence and no movement, indefinitely.
     /// </para>
+    /// <para>
+    /// Game update 1.012 changed that half: a failed reachability test now returns
+    /// <c>FailedToFindPath</c>, after calling the finish callback from inside <c>StartPath</c>. The
+    /// asynchronous half (a search that fails later) is unchanged, so the watch stays.
+    /// </para>
     /// </summary>
     private static NavTarget _pending;
+
+    /// <summary>True while our own StartPath call runs; see <see cref="OnArrived"/>.</summary>
+    private static bool _inStartPath;
+
+    /// <summary>The finish callback fired inside StartPath; acted on only for an arrival.</summary>
+    private static bool _finishedDuringStart;
     private static float _pendingSince;
     private static bool _triedFallback;
 
@@ -281,6 +294,11 @@ internal static class AutoWalk
     /// </summary>
     internal static void WalkTo(NavTarget target, string nothingMessage = null)
     {
+        if (RestAnnouncer.IsResting)
+        {
+            ScreenReader.Say(Loc.Get("rest.walk_blocked"));
+            return;
+        }
         if (SceneHasControl() != null)
         {
             ScreenReader.Say(Loc.Get("walk.scene_busy"));
@@ -439,12 +457,24 @@ internal static class AutoWalk
             _log?.LogWarning($"[Walk] Could not ask for the route length: {ex.Message}");
         }
 
-        var result = TryStart(movement, player, target, type);
+        MovementComponent.StartPathResult result;
+        _finishedDuringStart = false;
+        _inStartPath = true;
+        try
+        {
+            result = TryStart(movement, player, target, type);
+        }
+        finally
+        {
+            _inStartPath = false;
+        }
 
         if (result == MovementComponent.StartPathResult.AlreadyAtDestinationPoint)
         {
-            // StartPath has already called OnArrived for this case, which did the rest.
+            // StartPath called the finish callback from inside itself; OnArrived held it back
+            // until the result said it was an arrival and not a failure.
             _pending = default;
+            if (_finishedDuringStart) OnArrived();
             return;
         }
 
@@ -678,6 +708,26 @@ internal static class AutoWalk
 
     private static void OnArrived()
     {
+        // Since 1.012 StartPath calls the finish callback synchronously when it cannot find a path
+        // (StartCalculatedPath -> OnDestinationReachFailed), and only then returns FailedToFindPath.
+        // Inside StartPath the caller decides from the result; see RequestPath.
+        if (_inStartPath)
+        {
+            _finishedDuringStart = true;
+            return;
+        }
+
+        // A search that failed later, asynchronously, also lands here. That is not an arrival:
+        // while a request is pending WatchPending reports it (or falls back); otherwise a walk
+        // already under way was dropped, so say so instead of "arrived".
+        var movement = MainGame.PlayerController == null ? null : MainGame.PlayerController.MovementComponent;
+        if (movement != null && movement.Completion == MovementComponent.CompletionState.Fail)
+        {
+            _log?.LogInfo("[Walk] The game reported the walk as failed, not arrived.");
+            if (!_pending.IsValid) FailOrFallback(_leg != Leg.None ? _finalTarget : default);
+            return;
+        }
+
         _walking = false;
 
         if (_leg != Leg.None)
@@ -1033,6 +1083,7 @@ internal static class AutoWalk
             _leg = Leg.Crossing;
             var sceneId = MainGame.PlayerData.currentGameSceneId;
             MovementComponent.StartPathResult result;
+            _inStartPath = true;
             try
             {
                 result = movement.StartPath(_span.FarEnd, sceneId, sceneId, MovementType.Direct, WalkSpeed, string.Empty, OnArrived, null);
@@ -1041,6 +1092,10 @@ internal static class AutoWalk
             {
                 _log?.LogWarning($"[Walk] Could not start the bridge crossing: {ex.Message}");
                 result = MovementComponent.StartPathResult.IncorrectMovementType;
+            }
+            finally
+            {
+                _inStartPath = false;
             }
 
             if (result == MovementComponent.StartPathResult.AlreadyAtDestinationPoint)
@@ -1171,6 +1226,8 @@ internal static class AutoWalk
         {
             // Stopping the movement also clears the kinematic flag a stranded path leaves behind.
             player.MovementComponent?.ForceStop();
+            // Resting also speeds up time; only StopResting puts that back, and it hands ByRest back.
+            if (held.Remove(TakenControlType.ByRest)) RestAnnouncer.TryStandUp();
             foreach (var type in held) player.SetControlTakenType(type, isEnabled: true);
             _log?.LogWarning($"[Walk] Released control by force: {(held.Count == 0 ? "movement only" : string.Join(", ", held))}.");
             ScreenReader.Say(Loc.Get("control.released"));
@@ -1190,6 +1247,7 @@ internal static class AutoWalk
         TakenControlType.BySleep => Loc.Get("control.by_sleep"),
         TakenControlType.ByDeath => Loc.Get("control.by_death"),
         TakenControlType.BySceneLoading => Loc.Get("control.by_scene_loading"),
+        TakenControlType.ByRest => Loc.Get("control.by_rest"),
         _ => type.ToString(),
     };
 

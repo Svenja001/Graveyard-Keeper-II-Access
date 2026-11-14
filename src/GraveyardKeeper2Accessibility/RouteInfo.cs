@@ -153,7 +153,8 @@ internal static class RouteInfo
             if (index < 0) continue;
 
             var tag = string.IsNullOrEmpty(zone.customTag) ? zone.name : zone.customTag;
-            var isStory = StoryListeners.AwaitsZone(zone) || Navigator.HasAnyScript(zone);
+            // A scripted zone whose quests are all done is just a place now (user, 2026-11-09).
+            var isStory = StoryListeners.AwaitsZone(zone) || (Navigator.HasAnyScript(zone) && !StoryListeners.ZoneDone(zone));
             hits.Add((index, Navigator.Humanise(tag), isStory));
         }
 

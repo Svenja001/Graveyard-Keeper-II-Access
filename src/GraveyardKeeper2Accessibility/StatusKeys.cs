@@ -31,6 +31,7 @@ internal static class StatusKeys
     private static ConfigEntry<KeyboardShortcut> _zoneKey;
     private static ConfigEntry<KeyboardShortcut> _hotbarKey;
     private static ConfigEntry<KeyboardShortcut> _detailsKey;
+    private static ConfigEntry<KeyboardShortcut> _overviewKey;
 
     private static bool _bindingsLogged;
 
@@ -52,6 +53,9 @@ internal static class StatusKeys
             "Says what you carry overhead, then what is in the four hotbar slots.");
         _detailsKey = ModKeys.Bind(config, "Keys", "ItemDetails", new KeyboardShortcut(KeyCode.O),
             "Full details of the focused item, or reads the tooltip on screen again.");
+        _overviewKey = ModKeys.Bind(config, "Keys", "Overview", new KeyboardShortcut(KeyCode.U),
+            "Says what the map shows on its day icons: zombies and their limit, the PR machine's days " +
+            "left, town reputation, trade orders, the morgue, and the church and graveyard ratings.");
     }
 
     internal static void Update()
@@ -69,11 +73,20 @@ internal static class StatusKeys
             else if (_zoneKey.Value.IsDown()) SayZone();
             else if (_hotbarKey.Value.IsDown()) SayHotbar();
             else if (_detailsKey.Value.IsDown()) SayDetails();
+            else if (_overviewKey.Value.IsDown()) SayOverview();
         }
         catch (Exception ex)
         {
             _log?.LogError($"[Status] Readout failed: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    // ---- U ------------------------------------------------------------------------------------
+
+    private static void SayOverview()
+    {
+        if (ResourceAnnouncer.CurrentPlayer() == null) { NotInGame(); return; }
+        Say(MapOverview.Describe());
     }
 
     // ---- H ------------------------------------------------------------------------------------

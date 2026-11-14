@@ -23,6 +23,13 @@ internal static class StoryListeners
     /// <summary>Object custom tags a quest waits on.</summary>
     internal static readonly HashSet<string> WgoTags = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Talk events a quest waits for the player to use, by object id: <c>npc_donkey</c> →
+    /// <c>21_base_donkey_1</c>. Kept apart from <see cref="WgoIds"/> because such a check can only
+    /// ever fire while the object holds that event - see <see cref="AwaitsWgo"/>.
+    /// </summary>
+    private static readonly Dictionary<string, HashSet<string>> WgoEvents = new(StringComparer.Ordinal);
+
     private static int _frame = -1;
 
     /// <summary>Rereads the listeners, at most once a frame.</summary>
@@ -34,6 +41,7 @@ internal static class StoryListeners
         ZoneTags.Clear();
         WgoIds.Clear();
         WgoTags.Clear();
+        WgoEvents.Clear();
 
         var events = MainGame.Instance?.GameSave?.globalEventsSystem?.checkingEvents;
         if (events == null) return;
@@ -51,8 +59,19 @@ internal static class StoryListeners
 
                 case GlobalEventsSystem.Event.Type.WgoDead:
                 case GlobalEventsSystem.Event.Type.RemoveWgoDataFromScene:
-                case GlobalEventsSystem.Event.Type.Interaction:
                 case GlobalEventsSystem.Event.Type.CustomInteraction:
+                    if (!IsMainStory(ev)) break;
+                    var colon = ev.id.IndexOf(':');
+                    if (colon > 0 && colon < ev.id.Length - 1)
+                    {
+                        var wgo = ev.id.Substring(0, colon);
+                        if (!WgoEvents.TryGetValue(wgo, out var names)) WgoEvents[wgo] = names = new HashSet<string>(StringComparer.Ordinal);
+                        names.Add(ev.id.Substring(colon + 1));
+                    }
+                    else WgoIds.Add(BeforeColon(ev.id));
+                    break;
+
+                case GlobalEventsSystem.Event.Type.Interaction:
                 case GlobalEventsSystem.Event.Type.PlayerInsertOverheadToWgoAnItem:
                 case GlobalEventsSystem.Event.Type.PlayerTakeFromWgoTheItem:
                     // Objects are everywhere, so only the main story's own checks mark one - a side
@@ -74,12 +93,124 @@ internal static class StoryListeners
         return zone != null && !string.IsNullOrEmpty(zone.customTag) && ZoneTags.Contains(zone.customTag);
     }
 
+    /// <summary>
+    /// True when entering a zone cannot move the story: its quests are all over, or no quest
+    /// belongs to it at all. False when a quest listens for it or one of its quests is still open.
+    ///
+    /// <para>
+    /// <b>Reported (2026-11-09):</b> "Doctor Sister" and a forest zone stayed in the story triggers
+    /// after their quests were done, and every walk warned about story zones "that are also already
+    /// done". A zone with a flowscript was listed for the script alone, and the script never goes
+    /// away: <c>GDZone_Doctor_Sister</c> runs <c>Event_71_Doctor_Sister</c>, whose only quest,
+    /// <c>71_doctor_sister_corpse</c>, was completed. The story scripts are named
+    /// <c>Event_&lt;quest number&gt;_…</c>, so the quests of that number are the zone's quests.
+    /// Without a number, quests whose words begin with the zone's first two words
+    /// (<c>GDZone_Forest_Guards</c> → <c>31_forest_guards_*</c>) are used. A quest not begun yet
+    /// (Available) still counts as open - the forest guards' block starts that way, when you walk in.
+    /// </para>
+    /// </summary>
+    internal static bool ZoneDone(GDZone zone)
+    {
+        if (zone == null || AwaitsZone(zone)) return false;
+        RefreshQuests();
+        if (QuestStatusById.Count == 0) return false;
+
+        var number = ScriptNumber(zone.onEnter) ?? ScriptNumber(zone.onExit) ?? ScriptNumber(zone.onCrossedToLeft)
+            ?? ScriptNumber(zone.onCrossedToRight) ?? ScriptNumber(zone.onCrossedToUp) ?? ScriptNumber(zone.onCrossedToDown);
+
+        string prefix = null;
+        if (number == null)
+        {
+            var tag = Navigator.Humanise(string.IsNullOrEmpty(zone.customTag) ? zone.name : zone.customTag);
+            var words = tag.ToLowerInvariant().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length < 2) return false;
+            prefix = words[0] + "_" + words[1];
+        }
+
+                foreach (var pair in QuestStatusById)
+        {
+            var id = pair.Key;
+            var underscore = id.IndexOf('_');
+            if (underscore <= 0) continue;
+            var lead = id.Substring(0, underscore);
+            if (!lead.All(char.IsDigit)) continue;
+
+            var hit = number != null
+                ? lead == number
+                : id.Substring(underscore + 1).StartsWith(prefix + "_", StringComparison.Ordinal) || id.Substring(underscore + 1) == prefix;
+            if (!hit) continue;
+
+            if (pair.Value != QuestStatus.Completed && pair.Value != QuestStatus.Canceled) return false;
+        }
+
+        // No quest belongs to it at all: a flavour scene that plays every time and never moves
+        // the story on. GDZone_Bridge_To_Sawmill_Forest howls a wolf and warns about the forest on
+        // every visit, with no quest of its name and nothing that ever switches it off (user,
+        // 2026-11-09: "I can't seem to find a way to let it disappear").
+        return true;
+    }
+
+    private static readonly Regex EventNumber = new(@"^Event_(\d+)_", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static string ScriptNumber(GDZone.GDZoneEvent e)
+    {
+        var name = e?.flowScript == null ? null : e.flowScript.name;
+        if (string.IsNullOrEmpty(name)) return null;
+        var m = EventNumber.Match(name);
+        return m.Success ? m.Groups[1].Value.TrimStart('0').PadLeft(1, '0') : null;
+    }
+
+    private static readonly Dictionary<string, QuestStatus> QuestStatusById = new(StringComparer.Ordinal);
+    private static int _questFrame = -1;
+
+    private static void RefreshQuests()
+    {
+        if (_questFrame == Time.frameCount) return;
+        _questFrame = Time.frameCount;
+        QuestStatusById.Clear();
+        try
+        {
+            var quests = MainGame.Instance?.GameSave?.questSystemData?.questCollection?.quests;
+            if (quests == null) return;
+            foreach (var quest in quests)
+            {
+                if (quest != null && !string.IsNullOrEmpty(quest.id)) QuestStatusById[quest.id] = quest.status;
+            }
+        }
+        catch
+        {
+            QuestStatusById.Clear();
+        }
+    }
+
+    /// <summary>
+    /// True when a main-story check waits on this object right now.
+    ///
+    /// <para>
+    /// <b>A talk check counts only while the talk is there</b> (user, 2026-11-09: the donkey kept
+    /// turning up as a story step after every quest was done, "though he only delivers corpses and
+    /// can't be talked to"). <c>CustomInteraction 'npc_donkey:21_base_donkey_1'</c> is fired by
+    /// <c>WgoData</c> only when the player uses the interaction event of that name - it is
+    /// <c>id + ":" + event.str</c> as the event is popped. The check can linger in the save after
+    /// the event is gone, or wait for a flowscript to add it later; either way, until the object
+    /// holds that event, using it cannot count.
+    /// </para>
+    /// </summary>
     internal static bool AwaitsWgo(WgoData data)
     {
         Refresh();
         if (data == null) return false;
-        return (data.id != null && WgoIds.Contains(data.id))
-            || (!string.IsNullOrEmpty(data.CustomTag) && WgoTags.Contains(data.CustomTag));
+        if (data.id != null && WgoIds.Contains(data.id)) return true;
+        if (!string.IsNullOrEmpty(data.CustomTag) && WgoTags.Contains(data.CustomTag)) return true;
+
+        if (data.id == null || !WgoEvents.TryGetValue(data.id, out var names)) return false;
+        var events = data.Events;
+        if (events == null) return false;
+        foreach (var e in events)
+        {
+            if (e != null && e.str != null && names.Contains(e.str)) return true;
+        }
+        return false;
     }
 
     /// <summary>

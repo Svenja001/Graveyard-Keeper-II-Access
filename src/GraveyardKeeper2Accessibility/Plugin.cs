@@ -62,6 +62,7 @@ public class Plugin : BaseUnityPlugin
         FolioReader.Init();
         VendorReader.Init();
         HotBarReader.Init();
+        PrMachineReader.Init();
         ItemMenuReader.Init(Config);
 
         _repeatKey = ModKeys.Bind(Config,
@@ -176,6 +177,11 @@ public class Plugin : BaseUnityPlugin
                 new Harmony(PluginInfo.Guid + ".hotbar").PatchAll(typeof(HotBarReader));
                 Log.LogInfo("Patched the hotbar slot window.");
             }
+            if (PrMachineReader.Ready)
+            {
+                new Harmony(PluginInfo.Guid + ".prmachine").PatchAll(typeof(PrMachineReader));
+                Log.LogInfo("Patched the PR machine window.");
+            }
             new Harmony(PluginInfo.Guid + ".itemmenu").PatchAll(typeof(ItemMenuReader));
             Log.LogInfo("Patched destroying items from the item menu.");
             new Harmony(PluginInfo.Guid + ".planting").PatchAll(typeof(PlantingReader));
@@ -227,6 +233,15 @@ public class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             Log.LogError($"Patching the bug report window failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        try
+        {
+            new Harmony(PluginInfo.Guid + ".rest").PatchAll(typeof(RestAnnouncer));
+            Log.LogInfo("Patched resting on the bench.");
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Patching resting failed: {ex.GetType().Name}: {ex.Message}");
         }
         try
         {
@@ -305,6 +320,7 @@ public class Plugin : BaseUnityPlugin
         if (QuestReader.Update()) return;
 
         MenuKeys.Update();
+        RestAnnouncer.Update();
         // The "how many?" window steps by 10 on Page up/down, the object list's keys.
         if (!ItemCountReader.IsActive) Navigator.Update();
         AutoWalk.Update();
@@ -314,7 +330,7 @@ public class Plugin : BaseUnityPlugin
 
         if (_repeatKey.Value.IsDown() && !NotesReader.TryRepeat() && !BodyWindowsReader.TryRepeat() && !ChestButtons.TryRepeat() &&
             !CraftReader.TryRepeat() && !StationsReader.TryRepeat() && !TreesReader.TryRepeat() &&
-            !BindingsReader.TryRepeat() && !VendorReader.TryRepeat() && !TravelMapReader.TryRepeat())
+            !BindingsReader.TryRepeat() && !VendorReader.TryRepeat() && !TravelMapReader.TryRepeat() && !PrMachineReader.TryRepeat())
             UiNarrator.RepeatFocus();
     }
 

@@ -787,7 +787,10 @@ internal static class CraftReader
         {
             var queue = G.QueueButton(selection);
             if (queue != null && queue.gameObject.activeSelf && queue.interactable)
-                parts.Add(Loc.Fmt("craft.key_action", KeyFor(GameKey.AddCraftToQueue, _queueKey), CleanLabel(G.QueueButtonText(selection)) ?? Loc.Get("craft.add_to_queue")));
+                parts.Add(Loc.Fmt("craft.key_action", KeyFor(GameKey.AddCraftToQueue, _queueKey),
+                    IsGravePartRemove(selection)
+                        ? TmpText.Clean(LLBase.L("remove"))
+                        : CleanLabel(G.QueueButtonText(selection)) ?? Loc.Get("craft.add_to_queue")));
         }
 
         if (!startShown && data.WgoData?.Worker is ZombieWgoData)
@@ -1106,6 +1109,18 @@ internal static class CraftReader
                 var start = G.SelectionStartButton(selection);
                 var data = G.SelectionData(selection);
                 if (start == null || data == null) return false;
+                // Taking a headstone or fence off a grave has no Craft button: the game hides it and
+                // relabels the queue button "Remove". F used to say "cannot be made" with no reason
+                // (user, 2026-11-07), so it presses Remove instead.
+                if (!start.gameObject.activeSelf && selection is UICraftSelectionWindow remove && IsGravePartRemove(remove))
+                {
+                    var button = G.QueueButton(remove);
+                    if (button == null || !button.gameObject.activeSelf || !button.interactable)
+                        Say(Loc.Fmt("craft.cannot_because", StartProblem(data)));
+                    else
+                        Invoke(G.SelectionQueue, remove);
+                    return true;
+                }
                 if (!start.gameObject.activeSelf)
                 {
                     Say(data.WgoData?.Worker is ZombieWgoData ? Loc.Get("craft.zombie_queue_only") : Loc.Get("craft.cannot_start"));
@@ -1171,6 +1186,10 @@ internal static class CraftReader
         }
         return false;
     }
+
+    /// <summary>The grave window's "take off the headstone / fence" dialog, where the queue button is "Remove".</summary>
+    private static bool IsGravePartRemove(UICraftSelectionWindow window) =>
+        G.SelectionData(window) is UICraftSelectionWindowData { IsGravePartRemove: true };
 
     private static bool TryQueue(UICraftSelectionWindow window)
     {
