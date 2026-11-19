@@ -36,6 +36,7 @@ public class Plugin : BaseUnityPlugin
         RouteInfo.Init(Log);
         ObjectStatus.Init(Log);
         QuestReader.Init(Log, Config);
+        ResearchList.Init(Log);
         StatusKeys.Init(Log, Config);
         FactoryReader.Init(Log, Config);
         ResourceAnnouncer.Init(Log, Config);
@@ -151,6 +152,11 @@ public class Plugin : BaseUnityPlugin
             {
                 new Harmony(PluginInfo.Guid + ".bindings").PatchAll(typeof(BindingsReader));
                 Log.LogInfo("Patched the controls screen.");
+            }
+            if (ResearchList.Ready)
+            {
+                new Harmony(PluginInfo.Guid + ".researchlist").PatchAll(typeof(ResearchList));
+                Log.LogInfo("Patched the study note on item tooltips.");
             }
             if (SurveyResultReader.Ready)
             {

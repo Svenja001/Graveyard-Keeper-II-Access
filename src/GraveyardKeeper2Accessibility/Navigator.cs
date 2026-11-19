@@ -390,8 +390,21 @@ internal static class Navigator
     /// differs from its id is a thing the game itself considers worth naming.
     /// </para>
     /// </summary>
+    /// <summary>When the last object-list rebuilds ran, for <see cref="RebuildStats"/>.</summary>
+    private static readonly Queue<float> RecentRebuilds = new();
+
+    /// <summary>"12 list rebuilds in the last 10 s, last 0.4 s ago" - for the off-navmesh log line.</summary>
+    internal static string RebuildStats()
+    {
+        while (RecentRebuilds.Count > 0 && Time.unscaledTime - RecentRebuilds.Peek() > 10f) RecentRebuilds.Dequeue();
+        if (RecentRebuilds.Count == 0) return "no list rebuilds in the last 10 s";
+        return $"{RecentRebuilds.Count} list rebuild(s) in the last 10 s, last {Time.unscaledTime - RecentRebuilds.Last():0.0} s ago";
+    }
+
     private static void RebuildTargets(Vector3 from)
     {
+        RecentRebuilds.Enqueue(Time.unscaledTime);
+        while (RecentRebuilds.Count > 200) RecentRebuilds.Dequeue();
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var lap = 0L;
         string Lap()

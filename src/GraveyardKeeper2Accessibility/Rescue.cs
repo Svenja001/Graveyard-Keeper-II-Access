@@ -58,9 +58,15 @@ internal static class Rescue
     internal static void Init(ManualLogSource log, ConfigFile config)
     {
         _log = log;
-        _key = ModKeys.Bind(config, "Keys", "Rescue", new KeyboardShortcut(KeyCode.F5, KeyCode.LeftControl, KeyCode.LeftShift),
+        // Was Ctrl+Shift+F5 until 2026-11-19: the game opens its bug report on Shift+F5 (BugReporter,
+        // hard-coded, not in the binding list), whatever else is held. The window then swallowed the
+        // second, confirming press, so the rescue could never go - reported by a player who was
+        // stuck and had to reload.
+        _key = ModKeys.Bind(config, "Keys", "Rescue", new KeyboardShortcut(KeyCode.F5, KeyCode.LeftControl, KeyCode.LeftAlt),
             "Emergency: takes you back to the last safe place you stood (or the home travel stone) when you are stuck, " +
-            "fell out of the world or cannot get out. First press says where; a second press within 5 seconds goes.");
+            "fell out of the world or cannot get out. First press says where; a second press within 5 seconds goes. " +
+            "Do not put Shift on F5: Shift+F5 is the game's own bug report key.")
+            .Moved(new KeyboardShortcut(KeyCode.F5, KeyCode.LeftControl, KeyCode.LeftShift));
     }
 
     /// <summary>Notes safe spots; runs every frame, keys or not.</summary>

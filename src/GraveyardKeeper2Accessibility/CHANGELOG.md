@@ -1,3 +1,12 @@
+## 0.2.4
+
+* **Every item that can still be researched now says so** in its description: "Study: not
+complete". The game showed this only for some items, so others looked already done.
+* **The rescue key is now Ctrl+Alt+F5.** Ctrl+Shift+F5 also opened the game's bug report (Shift+F5
+is the game's own key), which swallowed the second press, so the rescue never went. An old config is
+moved over by itself. "No floor under you" now names the rescue key, and the log notes what the map
+looked like at that moment, to find out why it happens.
+
 ## 0.2.3
 
 * **Works with game update 1.012.** The update changed how the game reports a walk it cannot

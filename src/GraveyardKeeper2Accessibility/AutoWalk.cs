@@ -351,7 +351,7 @@ internal static class AutoWalk
         // 2026-10-04 it pushed the player off the warehouse platform and out of the world.
         if (OffMesh(player))
         {
-            _log?.LogWarning($"[Walk] Not walking to '{target.Id}': no floor on the map under the player at {player.MovablePosition}.");
+            _log?.LogWarning($"[Walk] Not walking to '{target.Id}': no floor on the map under the player. {OffMeshDetail(player)}");
             ResetLegs();
             ResetInteraction();
             ScreenReader.Say(Loc.Get("walk.off_mesh_refused"));
@@ -624,7 +624,7 @@ internal static class AutoWalk
         var player = MainGame.PlayerController;
         if (OffMesh(player))
         {
-            _log?.LogWarning($"[Walk] The player at {player.MovablePosition} is off the navmesh.");
+            _log?.LogWarning($"[Walk] The player is off the navmesh. {OffMeshDetail(player)}");
             ScreenReader.Say(Loc.Get("walk.off_mesh"));
             return;
         }
@@ -875,6 +875,59 @@ internal static class AutoWalk
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Everything the log needs to tell why <see cref="OffMesh"/> said yes.
+    ///
+    /// <para>
+    /// <b>Reported (2026-11-19), no log:</b> after flipping fast through the object categories a
+    /// player heard "no floor under you" on every walk. Walking by hand did not help, the rescue key
+    /// opened the game's bug report instead (Shift+F5 is the game's), and only reloading the save did.
+    /// That reads like a navmesh that broke for the rest of the session - the same as the
+    /// 2026-09-27 soft-lock, whose cause is still unknown. So the refusal now logs which graph was
+    /// asked, what every loaded graph has near the player, whether physics finds ground, and how
+    /// busy the object list was just before.
+    /// </para>
+    /// </summary>
+    internal static string OffMeshDetail(PlayerController player)
+    {
+        try
+        {
+            var at = player.MovablePosition;
+            var floor = Reachability.FloorGraph(player);
+            var scene = player.SceneRecastGraph;
+            var parts = new List<string>
+            {
+                $"at {at}",
+                $"zone '{MainGame.PlayerData?.CurrentWorldZoneData?.id ?? "(none)"}'",
+                $"scene graph {(scene == null ? "none" : scene.graphIndex.ToString())}",
+                $"floor graph {(floor == null ? "none" : floor.graphIndex.ToString())}",
+                $"ground by physics {(Physics.Raycast(at + Vector3.up * 0.3f, Vector3.down, 1.5f, Physics.DefaultRaycastLayers & ~(1 << LazyConsts.Layers.PLAYER), QueryTriggerInteraction.Ignore) ? "yes" : "no")}",
+                $"controls {(player.IsControlsEnabled ? "free" : "held")}",
+                Navigator.RebuildStats(),
+            };
+
+            var all = AstarPath.active == null || AstarPath.active.data == null ? null : AstarPath.active.data.graphs;
+            if (all != null)
+            {
+                foreach (var g in all)
+                {
+                    if (g is not Pathfinding.RecastGraph recast) continue;
+                    var count = recast.CountNodes();
+                    if (count == 0) continue;
+                    var nearest = recast.GetNearest(at);
+                    parts.Add(nearest.node == null
+                        ? $"graph {recast.graphIndex}: {count} nodes, none near"
+                        : $"graph {recast.graphIndex}: {count} nodes, nearest {Flat(nearest.position - at):0.0} m flat, {nearest.position.y - at.y:+0.0;-0.0} m up, area {nearest.node.Area}{(nearest.node.Walkable ? "" : ", not walkable")}");
+                }
+            }
+            return string.Join("; ", parts);
+        }
+        catch (Exception ex)
+        {
+            return $"(detail failed: {ex.Message})";
         }
     }
 
